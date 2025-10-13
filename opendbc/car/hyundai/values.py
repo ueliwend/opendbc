@@ -358,7 +358,7 @@ class CAR(Platforms):
                      car_parts=CarParts([Device.threex_angled_mount, CarHarness.hyundai_l])),
     ],
     HYUNDAI_PALISADE.specs,
-    flags=HyundaiFlags.CHECKSUM_CRC8 | HyundaiFlags.CAN_CANFD_BLENDED | HyundaiFlags.RADAR_SCC,
+    flags=HyundaiFlags.CHECKSUM_CRC8 | HyundaiFlags.CAN_CANFD_BLENDED | HyundaiFlags.RADAR_SCC | HyundaiFlags.EV,
   )
   HYUNDAI_VELOSTER = HyundaiPlatformConfig(
     [HyundaiCarDocs("Hyundai Veloster 2019-20", min_enable_speed=5. * CV.MPH_TO_MS, car_parts=CarParts.common([CarHarness.hyundai_e]))],
