@@ -53,9 +53,11 @@ FW_VERSIONS = {
       b'\xf1\x00AX  IEB \x02 103 $\x11  58520-GX000',
     ],
     (Ecu.eps, 0x7d4, None): [
+      b'\xf1\x00AX  MDPS C 1.00 1.02 56300-GX000 4711',
       b'\xf1\x00AX  MDPS C 1.00 1.04 56300-GX000 5327',
     ],
     (Ecu.fwdCamera, 0x7c4, None): [
+      b'\xf1\x00AXE MFC  AT EUR LHD 1.00 1.03 99211-GX000 250120',
       b'\xf1\x00AXE MFC  AT KOR LHD 1.00 1.03 99211-GX000 250120',
     ],
     (Ecu.fwdRadar, 0x7d0, None): [
