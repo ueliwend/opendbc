@@ -16,7 +16,7 @@ from opendbc.car.hyundai.values import CAR, DATE_FW_ECUS, \
                                          PLATFORM_CODE_ECUS, HYUNDAI_VERSION_REQUEST_LONG, \
                                          HyundaiFlags, get_platform_codes, HyundaiSafetyFlags, Buttons, DBC, \
                                          NON_SCC_CAR, CarControllerParams, INSTER_STEER_MAX, INSTER_STEER_DELTA_UP, \
-                                         INSTER_STEER_DELTA_DOWN
+                                         INSTER_STEER_DELTA_DOWN, INSTER_STEER_ACTUATOR_DELAY
 from opendbc.car.hyundai.fingerprints import FW_VERSIONS
 from opendbc.sunnypilot.car.hyundai.values import HyundaiFlagsSP
 from opendbc.testing import fuzzy_test
@@ -277,6 +277,15 @@ class TestHyundaiFingerprint(unittest.TestCase):
     params = CarControllerParams(CP)
     assert (params.STEER_MAX, params.STEER_DELTA_UP, params.STEER_DELTA_DOWN) == \
            (INSTER_STEER_MAX, INSTER_STEER_DELTA_UP, INSTER_STEER_DELTA_DOWN)
+
+  def test_inster_steer_actuator_delay(self):
+    # The Inster has its own default steering delay (INSTER_STEER_ACTUATOR_DELAY); the other cars keep theirs
+    fingerprint = gen_empty_fingerprint()
+    CP = CarInterface.get_params(CAR.HYUNDAI_INSTER, fingerprint, [], False, False, False)
+    self.assertAlmostEqual(CP.steerActuatorDelay, INSTER_STEER_ACTUATOR_DELAY, places=6)
+    for car_model in (CAR.HYUNDAI_KONA_EV, CAR.KIA_CEED):
+      CP = CarInterface.get_params(car_model, fingerprint, [], False, False, False)
+      self.assertAlmostEqual(CP.steerActuatorDelay, 0.1, places=6)
 
   def test_alt_ax1ev_buttons(self):
     fingerprint = gen_empty_fingerprint()

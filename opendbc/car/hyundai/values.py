@@ -21,6 +21,12 @@ INSTER_STEER_MAX = 384
 INSTER_STEER_DELTA_UP = 3
 INSTER_STEER_DELTA_DOWN = 5
 
+# Hyundai Inster default steering delay (CarParams.steerActuatorDelay), in seconds. openpilot adds 0.2 s to it: the
+# lateral delay learner starts from that total until it has learned a value, and with live learning switched off the
+# delay is this plus the software delay setting (0.2 s by default). The car's learner measured 0.196 s in total on the
+# owner's 15 Oct 2026 drive (4 of the 5 blocks it needs, each between 0.192 and 0.199 s), so 0.0 here gives 0.2 s.
+INSTER_STEER_ACTUATOR_DELAY = 0.0
+
 
 class CarControllerParams:
   ACCEL_MIN = -3.5 # m/s^2
