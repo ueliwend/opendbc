@@ -7,7 +7,7 @@
 // Keep in sync with INSTER_STEER_* in opendbc/car/hyundai/values.py.
 #define HYUNDAI_INSTER_STEER_MAX 384
 #define HYUNDAI_INSTER_STEER_DELTA_UP 3
-#define HYUNDAI_INSTER_STEER_DELTA_DOWN 5
+#define HYUNDAI_INSTER_STEER_DELTA_DOWN 4
 
 #define HYUNDAI_LIMITS(steer, rate_up, rate_down) { \
   .max_torque = (steer), \
