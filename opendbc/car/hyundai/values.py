@@ -19,7 +19,7 @@ Ecu = CarParams.Ecu
 # LAT_ACCEL_FACTOR in torque_data/override.toml by the same ratio (it is per full command).
 INSTER_STEER_MAX = 384
 INSTER_STEER_DELTA_UP = 3
-INSTER_STEER_DELTA_DOWN = 7
+INSTER_STEER_DELTA_DOWN = 5
 
 
 class CarControllerParams:
