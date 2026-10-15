@@ -118,6 +118,7 @@ legend = ["LAT_ACCEL_FACTOR", "MAX_LAT_ACCEL_MEASURED", "FRICTION"]
 "CHEVROLET_MALIBU_NON_ACC_9TH_GEN" = [1.85, 1.85, 0.075]
 
 # Hyundai Inster (EU): lateral accel factor and friction from torqued on the owner's 14 Oct 2026 drive
-# (2.59 / 0.111 from 2,808 points; 95% range of the factor 2.45-2.76). MAX_LAT_ACCEL_MEASURED kept at the
-# HYUNDAI_KONA_EV value until measured.
-"HYUNDAI_INSTER" = [2.6, 2.307336938253934, 0.11]
+# (2.59 / 0.111 from 2,808 points; 95% range of the factor 2.45-2.76), measured with a 270 torque cap.
+# The factor is per full command, so it scales with INSTER_STEER_MAX: 2.6 * 384 / 270 = 3.70. Friction is
+# applied in lateral-accel units, so it stays. MAX_LAT_ACCEL_MEASURED kept at the HYUNDAI_KONA_EV value until measured.
+"HYUNDAI_INSTER" = [3.7, 2.307336938253934, 0.11]

@@ -3,7 +3,7 @@ from opendbc.testing import parameterized_class
 import random
 import unittest
 
-from opendbc.car.hyundai.values import HyundaiSafetyFlags
+from opendbc.car.hyundai.values import HyundaiSafetyFlags, INSTER_STEER_MAX, INSTER_STEER_DELTA_UP, INSTER_STEER_DELTA_DOWN
 from opendbc.car.structs import CarParams
 from opendbc.safety.tests.libsafety import libsafety_py
 import opendbc.safety.tests.common as common
@@ -274,6 +274,27 @@ class TestHyundaiSafetyAltLimits2(TestHyundaiSafety):
     self.safety = libsafety_py.libsafety
     self.safety.set_current_safety_param_sp(self.SAFETY_PARAM_SP)
     self.safety.set_safety_hooks(CarParams.SafetyModel.hyundai, HyundaiSafetyFlags.ALT_LIMITS_2)
+    self.safety.init_tests()
+
+
+@parameterized_class(LDA_BUTTON)
+class TestHyundaiSafetyInsterLimits(TestHyundaiSafety):
+  # uses the openpilot-side values, so the test fails if hyundai.h and values.py drift apart
+  MAX_RATE_UP = INSTER_STEER_DELTA_UP
+  MAX_RATE_DOWN = INSTER_STEER_DELTA_DOWN
+  MAX_TORQUE_LOOKUP = [0], [INSTER_STEER_MAX]
+
+  @classmethod
+  def setUpClass(cls):
+    if cls.__name__ == "TestHyundaiSafetyInsterLimits":
+      cls.safety = None
+      raise unittest.SkipTest
+
+  def setUp(self):
+    self.packer = CANPackerSafety("hyundai_can_generated")
+    self.safety = libsafety_py.libsafety
+    self.safety.set_current_safety_param_sp(self.SAFETY_PARAM_SP)
+    self.safety.set_safety_hooks(CarParams.SafetyModel.hyundai, HyundaiSafetyFlags.INSTER_LIMITS)
     self.safety.init_tests()
 
 

@@ -13,6 +13,15 @@ from opendbc.sunnypilot.car.hyundai.values import HyundaiFlagsSP
 Ecu = CarParams.Ecu
 
 
+# Hyundai Inster steering limits, in raw LKAS11 torque units and per 10 ms frame.
+# The panda enforces the same numbers in opendbc/safety/modes/hyundai.h (HYUNDAI_INSTER_STEER_*); change both
+# together (the safety test fails if they differ). When changing INSTER_STEER_MAX, scale HYUNDAI_INSTER's
+# LAT_ACCEL_FACTOR in torque_data/override.toml by the same ratio (it is per full command).
+INSTER_STEER_MAX = 384
+INSTER_STEER_DELTA_UP = 3
+INSTER_STEER_DELTA_DOWN = 7
+
+
 class CarControllerParams:
   ACCEL_MIN = -3.5 # m/s^2
   ACCEL_MAX = 2.0 # m/s^2
@@ -33,6 +42,12 @@ class CarControllerParams:
       self.STEER_THRESHOLD = 250
       self.STEER_DELTA_UP = 2
       self.STEER_DELTA_DOWN = 3
+
+    # Hyundai Inster: its own limit entry (INSTER_STEER_* above) so it can be tuned on its own
+    elif CP.flags & HyundaiFlags.INSTER_LIMITS:
+      self.STEER_MAX = INSTER_STEER_MAX
+      self.STEER_DELTA_UP = INSTER_STEER_DELTA_UP
+      self.STEER_DELTA_DOWN = INSTER_STEER_DELTA_DOWN
 
     # To determine the limit for your car, find the maximum value that the stock LKAS will request.
     # If the max stock LKAS request is <384, add your car to this list.
@@ -70,6 +85,7 @@ class HyundaiSafetyFlags(IntFlag):
   ALT_LIMITS_2 = 512
   CAN_REFRESH_MSGS = 1024
   ALT_AX1EV_BUTTONS = 2048
+  INSTER_LIMITS = 4096
 
 
 # Hyundai/Kia/Genesis SCC (Smart Cruise Control) and steering architecture:
@@ -154,6 +170,9 @@ class HyundaiFlags(IntFlag):
   CAN_REFRESH_MSGS = 2 ** 27
 
   ALT_AX1EV_BUTTONS = 2 ** 28
+
+  # Hyundai Inster steering limits (INSTER_STEER_* above, HYUNDAI_INSTER_STEER_* in the panda safety)
+  INSTER_LIMITS = 2 ** 29
 
 
 @dataclass
@@ -276,7 +295,7 @@ class CAR(Platforms):
   HYUNDAI_INSTER = HyundaiRefreshPlatformConfig(
     [HyundaiCarDocs("Hyundai Inster (Casper Electric) 2025", car_parts=CarParts.common([CarHarness.hyundai_a]))],
     CarSpecs(mass=1450, wheelbase=2.580, steerRatio=13.8, tireStiffnessFactor=0.385),
-    flags=HyundaiFlags.CHECKSUM_CRC8 | HyundaiFlags.CAMERA_SCC | HyundaiFlags.EV | HyundaiFlags.ALT_LIMITS | HyundaiFlags.ALT_AX1EV_BUTTONS,
+    flags=HyundaiFlags.CHECKSUM_CRC8 | HyundaiFlags.CAMERA_SCC | HyundaiFlags.EV | HyundaiFlags.INSTER_LIMITS | HyundaiFlags.ALT_AX1EV_BUTTONS,
   )
   HYUNDAI_IONIQ = HyundaiPlatformConfig(
     [HyundaiCarDocs("Hyundai Ioniq Hybrid 2017-19", car_parts=CarParts.common([CarHarness.hyundai_c]))],

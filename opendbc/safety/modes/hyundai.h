@@ -3,6 +3,12 @@
 #include "opendbc/safety/declarations.h"
 #include "opendbc/safety/modes/hyundai_common.h"
 
+// Hyundai Inster steering limits (raw LKAS11 torque units, per 10 ms frame).
+// Keep in sync with INSTER_STEER_* in opendbc/car/hyundai/values.py.
+#define HYUNDAI_INSTER_STEER_MAX 384
+#define HYUNDAI_INSTER_STEER_DELTA_UP 3
+#define HYUNDAI_INSTER_STEER_DELTA_DOWN 7
+
 #define HYUNDAI_LIMITS(steer, rate_up, rate_down) { \
   .max_torque = (steer), \
   .max_rate_up = (rate_up), \
@@ -257,6 +263,8 @@ static bool hyundai_tx_hook(const CANPacket_t *msg) {
   const TorqueSteeringLimits HYUNDAI_STEERING_LIMITS = HYUNDAI_LIMITS(384, 3, 7);
   const TorqueSteeringLimits HYUNDAI_STEERING_LIMITS_ALT = HYUNDAI_LIMITS(270, 2, 3);
   const TorqueSteeringLimits HYUNDAI_STEERING_LIMITS_ALT_2 = HYUNDAI_LIMITS(170, 2, 3);
+  const TorqueSteeringLimits HYUNDAI_STEERING_LIMITS_INSTER = HYUNDAI_LIMITS(HYUNDAI_INSTER_STEER_MAX, HYUNDAI_INSTER_STEER_DELTA_UP,
+                                                                             HYUNDAI_INSTER_STEER_DELTA_DOWN);
 
   bool tx = true;
 
@@ -305,7 +313,8 @@ static bool hyundai_tx_hook(const CANPacket_t *msg) {
     int desired_torque = ((GET_BYTES(msg, 0, 4) >> 16) & 0x7ffU) - 1024U;
     bool steer_req = GET_BIT(msg, 27U);
 
-    const TorqueSteeringLimits limits = hyundai_alt_limits_2 ? HYUNDAI_STEERING_LIMITS_ALT_2 :
+    const TorqueSteeringLimits limits = hyundai_inster_limits ? HYUNDAI_STEERING_LIMITS_INSTER :
+                                        hyundai_alt_limits_2 ? HYUNDAI_STEERING_LIMITS_ALT_2 :
                                         hyundai_alt_limits ? HYUNDAI_STEERING_LIMITS_ALT : HYUNDAI_STEERING_LIMITS;
 
     if (steer_torque_cmd_checks(desired_torque, steer_req, limits)) {

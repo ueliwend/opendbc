@@ -49,6 +49,9 @@ bool hyundai_fcev_gas_signal = false;
 extern bool hyundai_alt_limits_2;
 bool hyundai_alt_limits_2 = false;
 
+extern bool hyundai_inster_limits;
+bool hyundai_inster_limits = false;
+
 // ESCC
 extern bool hyundai_escc;
 bool hyundai_escc = false;
@@ -85,6 +88,7 @@ void hyundai_common_init(uint16_t param) {
   const uint16_t HYUNDAI_PARAM_ALT_LIMITS_2 = 512;
   const uint16_t HYUNDAI_PARAM_CAN_REFRESH_MSGS = 1024;
   const uint16_t HYUNDAI_PARAM_ALT_AX1EV_BUTTONS = 2048;
+  const uint16_t HYUNDAI_PARAM_INSTER_LIMITS = 4096;
 
   hyundai_ev_gas_signal = GET_FLAG(param, HYUNDAI_PARAM_EV_GAS);
   hyundai_hybrid_gas_signal = !hyundai_ev_gas_signal && GET_FLAG(param, HYUNDAI_PARAM_HYBRID_GAS);
@@ -95,6 +99,7 @@ void hyundai_common_init(uint16_t param) {
   hyundai_alt_limits_2 = GET_FLAG(param, HYUNDAI_PARAM_ALT_LIMITS_2);
   hyundai_can_refresh_msgs = GET_FLAG(param, HYUNDAI_PARAM_CAN_REFRESH_MSGS);
   hyundai_alt_ax1ev_buttons = GET_FLAG(param, HYUNDAI_PARAM_ALT_AX1EV_BUTTONS);
+  hyundai_inster_limits = GET_FLAG(param, HYUNDAI_PARAM_INSTER_LIMITS);
 
   hyundai_escc = GET_FLAG(current_safety_param_sp, HYUNDAI_PARAM_SP_ESCC);
   hyundai_longitudinal_main_cruise_toggleable = GET_FLAG(current_safety_param_sp, HYUNDAI_PARAM_SP_LONGITUDINAL_MAIN_CRUISE_TOGGLEABLE);

@@ -15,7 +15,8 @@ from opendbc.car.hyundai.values import CAR, DATE_FW_ECUS, \
                                          FW_QUERY_CONFIG, CANFD_FUZZY_WHITELIST, \
                                          PLATFORM_CODE_ECUS, HYUNDAI_VERSION_REQUEST_LONG, \
                                          HyundaiFlags, get_platform_codes, HyundaiSafetyFlags, Buttons, DBC, \
-                                         NON_SCC_CAR
+                                         NON_SCC_CAR, CarControllerParams, INSTER_STEER_MAX, INSTER_STEER_DELTA_UP, \
+                                         INSTER_STEER_DELTA_DOWN
 from opendbc.car.hyundai.fingerprints import FW_VERSIONS
 from opendbc.sunnypilot.car.hyundai.values import HyundaiFlagsSP
 from opendbc.testing import fuzzy_test
@@ -262,6 +263,20 @@ class TestHyundaiFingerprint(unittest.TestCase):
     for car_model in CAR:
       CP = CarInterface.get_params(car_model, fingerprint, [], False, False, False)
       assert bool(CP.flags & HyundaiFlags.ALT_LIMITS) == bool(CP.safetyConfigs[-1].safetyParam & HyundaiSafetyFlags.ALT_LIMITS)
+
+  def test_inster_limits(self):
+    # The Inster has its own lateral limit entry; only it sets the flag, and the Panda safety flag must match
+    fingerprint = gen_empty_fingerprint()
+    for car_model in CAR:
+      CP = CarInterface.get_params(car_model, fingerprint, [], False, False, False)
+      is_inster = car_model == CAR.HYUNDAI_INSTER
+      assert bool(CP.flags & HyundaiFlags.INSTER_LIMITS) == is_inster
+      assert bool(CP.safetyConfigs[-1].safetyParam & HyundaiSafetyFlags.INSTER_LIMITS) == is_inster
+
+    CP = CarInterface.get_params(CAR.HYUNDAI_INSTER, fingerprint, [], False, False, False)
+    params = CarControllerParams(CP)
+    assert (params.STEER_MAX, params.STEER_DELTA_UP, params.STEER_DELTA_DOWN) == \
+           (INSTER_STEER_MAX, INSTER_STEER_DELTA_UP, INSTER_STEER_DELTA_DOWN)
 
   def test_alt_ax1ev_buttons(self):
     fingerprint = gen_empty_fingerprint()
