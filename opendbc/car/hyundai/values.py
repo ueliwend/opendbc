@@ -15,8 +15,9 @@ Ecu = CarParams.Ecu
 
 # Hyundai Inster steering limits, in raw LKAS11 torque units and per 10 ms frame.
 # The panda enforces the same numbers in opendbc/safety/modes/hyundai.h (HYUNDAI_INSTER_STEER_*); change both
-# together (the safety test fails if they differ). When changing INSTER_STEER_MAX, scale HYUNDAI_INSTER's
-# LAT_ACCEL_FACTOR in torque_data/override.toml by the same ratio (it is per full command).
+# together (the safety test fails if they differ). When changing INSTER_STEER_MAX, update HYUNDAI_INSTER in
+# torque_data/override.toml as well: both values there are per full command. Scale LAT_ACCEL_FACTOR by the same
+# ratio; FRICTION shrinks roughly by the inverse ratio and is best taken from the car's torque learner at the new cap.
 INSTER_STEER_MAX = 384
 INSTER_STEER_DELTA_UP = 2
 INSTER_STEER_DELTA_DOWN = 3

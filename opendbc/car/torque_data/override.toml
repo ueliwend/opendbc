@@ -119,6 +119,9 @@ legend = ["LAT_ACCEL_FACTOR", "MAX_LAT_ACCEL_MEASURED", "FRICTION"]
 
 # Hyundai Inster (EU): lateral accel factor and friction from torqued on the owner's 14 Oct 2026 drive
 # (2.59 / 0.111 from 2,808 points; 95% range of the factor 2.45-2.76), measured with a 270 torque cap.
-# The factor is per full command, so it scales with INSTER_STEER_MAX: 2.6 * 384 / 270 = 3.70. Friction is
-# applied in lateral-accel units, so it stays. MAX_LAT_ACCEL_MEASURED kept at the HYUNDAI_KONA_EV value until measured.
-"HYUNDAI_INSTER" = [3.7, 2.307336938253934, 0.11]
+# Both values are per full command, so they follow INSTER_STEER_MAX (384). Factor: 2.6 * 384 / 270 = 3.70.
+# Friction: get_friction multiplies it by the factor and the torque controller divides by the factor again, so
+# it is a share of the full command too, not a lateral acceleration. torqued on the same drive with the torque in
+# 384 units gives 0.085 (live estimate on the car at 384, 15 Oct 2026: 0.084); 0.11 was too strong at 384.
+# MAX_LAT_ACCEL_MEASURED kept at the HYUNDAI_KONA_EV value until measured.
+"HYUNDAI_INSTER" = [3.7, 2.307336938253934, 0.085]
