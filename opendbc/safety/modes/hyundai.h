@@ -90,35 +90,38 @@ static const CanMsg HYUNDAI_TX_MSGS[] = {
 static bool hyundai_legacy = false;
 
 static uint8_t hyundai_get_counter(const CANPacket_t *msg) {
-
   uint8_t cnt = 0;
   if (msg->addr == 0x260U) {
     cnt = (msg->data[7] >> 4) & 0x3U;
-  } else if (msg->addr == 0x386U) {
+  }
+  if (msg->addr == 0x386U) {
     cnt = ((msg->data[3] >> 6) << 2) | (msg->data[1] >> 6);
-  } else if (msg->addr == 0x394U) {
+  }
+  if (msg->addr == 0x394U) {
     cnt = (msg->data[1] >> 5) & 0x7U;
-  } else if (msg->addr == 0x421U) {
+  }
+  if (msg->addr == 0x421U) {
     cnt = msg->data[7] & 0xFU;
-  } else if (msg->addr == 0x4F1U) {
+  }
+  if (msg->addr == 0x4F1U) {
     cnt = (msg->data[3] >> 4) & 0xFU;
-  } else {
   }
   return cnt;
 }
 
 static uint32_t hyundai_get_checksum(const CANPacket_t *msg) {
-
   uint8_t chksum = 0;
   if (msg->addr == 0x260U) {
     chksum = msg->data[7] & 0xFU;
-  } else if (msg->addr == 0x386U) {
+  }
+  if (msg->addr == 0x386U) {
     chksum = ((msg->data[7] >> 6) << 2) | (msg->data[5] >> 6);
-  } else if (msg->addr == 0x394U) {
+  }
+  if (msg->addr == 0x394U) {
     chksum = msg->data[6] & 0xFU;
-  } else if (msg->addr == 0x421U) {
+  }
+  if (msg->addr == 0x421U) {
     chksum = msg->data[7] >> 4;
-  } else {
   }
   return chksum;
 }
@@ -143,11 +146,11 @@ static uint32_t hyundai_compute_checksum(const CANPacket_t *msg) {
     // sum of nibbles
     for (int i = 0; i < 8; i++) {
       if ((msg->addr == 0x394U) && (i == 7)) {
-        continue; // exclude
+        continue;  // exclude
       }
       uint8_t b = msg->data[i];
       if (((msg->addr == 0x260U) && (i == 7)) || ((msg->addr == 0x394U) && (i == 6)) || ((msg->addr == 0x421U) && (i == 7))) {
-        b &= (msg->addr == 0x421U) ? 0x0FU : 0xF0U; // remove checksum
+        b &= (msg->addr == 0x421U) ? 0x0FU : 0xF0U;  // remove checksum
       }
       chksum += (b % 16U) + (b / 16U);
     }
@@ -158,102 +161,95 @@ static uint32_t hyundai_compute_checksum(const CANPacket_t *msg) {
 }
 
 static void hyundai_rx_hook(const CANPacket_t *msg) {
-
   // SCC12 is on bus 2 for camera-based SCC cars, bus 0 on all others
-  if (msg->addr == 0x421U) {
-    if (((msg->bus == 0U) && !hyundai_camera_scc) || ((msg->bus == 2U) && hyundai_camera_scc)) {
-      // 2 bits: 13-14
-      int cruise_engaged = (GET_BYTES(msg, 0, 4) >> 13) & 0x3U;
-      hyundai_common_cruise_state_check(cruise_engaged);
+  if (msg_matches(msg, 0x421U, hyundai_camera_scc ? 2U : 0U)) {
+    // 2 bits: 13-14
+    int cruise_engaged = (GET_BYTES_LE(msg, 0, 4) >> 13) & 0x3U;
+    hyundai_common_cruise_state_check(cruise_engaged);
+  }
+
+  if (msg_matches(msg, 0x420U, hyundai_camera_scc ? 2U : 0U)) {
+    if (!hyundai_longitudinal) {
+      acc_main_on = GET_BIT(msg, 0U);
     }
   }
 
-  if (msg->addr == 0x420U) {
-    if (((msg->bus == 0U) && !hyundai_camera_scc) || ((msg->bus == 2U) && hyundai_camera_scc)) {
-      if (!hyundai_longitudinal) {
-        acc_main_on = GET_BIT(msg, 0U);
-      }
-    }
+  if (msg_matches(msg, 0x251U, 0U)) {
+    int torque_driver_new = (GET_BYTES_LE(msg, 0, 2) & 0x7ffU) - 1024U;
+    // update array of samples
+    update_sample(&torque_driver, torque_driver_new);
   }
 
-  if (msg->bus == 0U) {
-    if (msg->addr == 0x251U) {
-      int torque_driver_new = (GET_BYTES(msg, 0, 2) & 0x7ffU) - 1024U;
-      // update array of samples
-      update_sample(&torque_driver, torque_driver_new);
-    }
+  // LDA steering wheel button
+  if (msg_matches(msg, 0x416U, 0U) && hyundai_alt_ax1ev_buttons) {
+    mads_button_press = GET_BIT(msg, 58U) ? MADS_BUTTON_PRESSED : MADS_BUTTON_NOT_PRESSED;
+  } else if (msg_matches(msg, 0x391U, 0U) && !hyundai_alt_ax1ev_buttons) {
+    mads_button_press = GET_BIT(msg, 4U) ? MADS_BUTTON_PRESSED : MADS_BUTTON_NOT_PRESSED;
+  } else {
+  }
 
-    // LDA steering wheel button
-    if ((msg->addr == 0x416U) && hyundai_alt_ax1ev_buttons) {
-      mads_button_press = GET_BIT(msg, 58U) ? MADS_BUTTON_PRESSED : MADS_BUTTON_NOT_PRESSED;
-    } else if ((msg->addr == 0x391U) && !hyundai_alt_ax1ev_buttons) {
-      mads_button_press = GET_BIT(msg, 4U) ? MADS_BUTTON_PRESSED : MADS_BUTTON_NOT_PRESSED;
+  // AX1EV ACC steering wheel buttons
+  if (msg_matches(msg, 0x3EFU, 0U) && hyundai_alt_ax1ev_buttons) {
+    int cruise_button = HYUNDAI_BTN_NONE;
+    int ax1_button = (msg->data[7] >> 4U) & 0x3U;
+    if (GET_BIT(msg, 62U)) {
+      cruise_button = HYUNDAI_BTN_CANCEL;
+    } else if (ax1_button == 1) {
+      cruise_button = HYUNDAI_BTN_RESUME;
+    } else if (ax1_button == 2) {
+      cruise_button = HYUNDAI_BTN_SET;
     } else {
     }
+    hyundai_common_cruise_buttons_check(cruise_button, GET_BIT(msg, 58U));
+  }
 
-    // AX1EV ACC steering wheel buttons
-    if ((msg->addr == 0x3EFU) && hyundai_alt_ax1ev_buttons) {
-      int cruise_button = HYUNDAI_BTN_NONE;
-      int ax1_button = (msg->data[7] >> 4U) & 0x3U;
-      if (GET_BIT(msg, 62U)) {
-        cruise_button = HYUNDAI_BTN_CANCEL;
-      } else if (ax1_button == 1) {
-        cruise_button = HYUNDAI_BTN_RESUME;
-      } else if (ax1_button == 2) {
-        cruise_button = HYUNDAI_BTN_SET;
-      } else {
-      }
-      hyundai_common_cruise_buttons_check(cruise_button, GET_BIT(msg, 58U));
-    }
+  // Legacy ACC steering wheel buttons. AX1EV also sends this frame with an
+  // unrelated button value, so it must not overwrite the 0x3EF edge state.
+  if (msg_matches(msg, 0x4F1U, 0U) && !hyundai_alt_ax1ev_buttons) {
+    int cruise_button = msg->data[0] & 0x7U;
+    bool main_button = GET_BIT(msg, 3U);
+    hyundai_common_cruise_buttons_check(cruise_button, main_button);
+  }
 
-    // Legacy ACC steering wheel buttons. AX1EV also sends this frame with an
-    // unrelated button value, so it must not overwrite the 0x3EF edge state.
-    if ((msg->addr == 0x4F1U) && !hyundai_alt_ax1ev_buttons) {
-      int cruise_button = msg->data[0] & 0x7U;
-      bool main_button = GET_BIT(msg, 3U);
-      hyundai_common_cruise_buttons_check(cruise_button, main_button);
-    }
+  // gas press, different for EV, hybrid, and ICE models
+  if (msg_matches(msg, 0x371U, 0U) && hyundai_ev_gas_signal) {
+    gas_pressed = (((msg->data[4] & 0x7FU) << 1) | (msg->data[3] >> 7)) != 0U;
+  } else if (msg_matches(msg, 0x371U, 0U) && hyundai_hybrid_gas_signal) {
+    gas_pressed = msg->data[7] != 0U;
+  } else if (msg_matches(msg, 0x91U, 0U) && hyundai_fcev_gas_signal) {
+    gas_pressed = msg->data[6] != 0U;
+  } else if (msg_matches(msg, 0x260U, 0U) && !hyundai_ev_gas_signal && !hyundai_hybrid_gas_signal) {
+    gas_pressed = (msg->data[7] >> 6) != 0U;
+  } else {
+  }
 
-    // gas press, different for EV, hybrid, and ICE models
-    if ((msg->addr == 0x371U) && hyundai_ev_gas_signal) {
-      gas_pressed = (((msg->data[4] & 0x7FU) << 1) | (msg->data[3] >> 7)) != 0U;
-    } else if ((msg->addr == 0x371U) && hyundai_hybrid_gas_signal) {
-      gas_pressed = msg->data[7] != 0U;
-    } else if ((msg->addr == 0x91U) && hyundai_fcev_gas_signal) {
-      gas_pressed = msg->data[6] != 0U;
-    } else if ((msg->addr == 0x260U) && !hyundai_ev_gas_signal && !hyundai_hybrid_gas_signal) {
-      gas_pressed = (msg->data[7] >> 6) != 0U;
-    } else {
-    }
+  // sample wheel speed, averaging opposite corners
+  if (msg_matches(msg, 0x386U, 0U)) {
+    uint32_t front_left_speed = GET_BYTES_LE(msg, 0, 2) & 0x3FFFU;
+    uint32_t rear_right_speed = GET_BYTES_LE(msg, 6, 2) & 0x3FFFU;
+    vehicle_moving = (front_left_speed > HYUNDAI_STANDSTILL_THRSLD) || (rear_right_speed > HYUNDAI_STANDSTILL_THRSLD);
+  }
 
-    // sample wheel speed, averaging opposite corners
-    if (msg->addr == 0x386U) {
-      uint32_t front_left_speed = GET_BYTES(msg, 0, 2) & 0x3FFFU;
-      uint32_t rear_right_speed = GET_BYTES(msg, 6, 2) & 0x3FFFU;
-      vehicle_moving = (front_left_speed > HYUNDAI_STANDSTILL_THRSLD) || (rear_right_speed > HYUNDAI_STANDSTILL_THRSLD);
-    }
+  if (msg_matches(msg, 0x394U, 0U)) {
+    brake_pressed = ((msg->data[5] >> 5U) & 0x3U) == 0x2U;
+  }
 
-    if (msg->addr == 0x394U) {
-      brake_pressed = ((msg->data[5] >> 5U) & 0x3U) == 0x2U;
-    }
+  if (msg_matches(msg, 0x592U, 0U)) {
+    acc_main_on = GET_BIT(msg, 34U);
+    bool cruise_engaged = GET_BIT(msg, 35U);
+    hyundai_common_cruise_state_check(cruise_engaged);
+  }
 
-    if (msg->addr == 0x592U) {
-      acc_main_on = GET_BIT(msg, 34U);
-      bool cruise_engaged = GET_BIT(msg, 35U);
-      hyundai_common_cruise_state_check(cruise_engaged);
-    }
+  if (msg_matches(msg, 0x595U, 0U)) {
+    acc_main_on = GET_BIT(msg, 50U);
+    bool cruise_engaged = GET_BIT(msg, 51U);
+    hyundai_common_cruise_state_check(cruise_engaged);
+  }
 
-    if (msg->addr == 0x595U) {
-      acc_main_on = GET_BIT(msg, 50U);
-      bool cruise_engaged = GET_BIT(msg, 51U);
-      hyundai_common_cruise_state_check(cruise_engaged);
-    }
-
-    if ((msg->addr == 0x260U) && hyundai_non_scc && !hyundai_ev_gas_signal && !hyundai_hybrid_gas_signal) {
-      acc_main_on = GET_BIT(msg, 25U);
-      bool cruise_engaged = GET_BIT(msg, 26U);
-      hyundai_common_cruise_state_check(cruise_engaged);
-    }
+  if (msg_matches(msg, 0x260U, 0U) && hyundai_non_scc && !hyundai_ev_gas_signal && !hyundai_hybrid_gas_signal) {
+    acc_main_on = GET_BIT(msg, 25U);
+    bool cruise_engaged = GET_BIT(msg, 26U);
+    hyundai_common_cruise_state_check(cruise_engaged);
   }
 
   hyundai_common_reset_acc_main_on_mismatches();
@@ -310,7 +306,7 @@ static bool hyundai_tx_hook(const CANPacket_t *msg) {
 
   // LKA STEER: safety check
   if (msg->addr == 0x340U) {
-    int desired_torque = ((GET_BYTES(msg, 0, 4) >> 16) & 0x7ffU) - 1024U;
+    int desired_torque = ((GET_BYTES_LE(msg, 0, 4) >> 16) & 0x7ffU) - 1024U;
     bool steer_req = GET_BIT(msg, 27U);
 
     const TorqueSteeringLimits limits = hyundai_inster_limits ? HYUNDAI_STEERING_LIMITS_INSTER :
@@ -324,7 +320,7 @@ static bool hyundai_tx_hook(const CANPacket_t *msg) {
 
   // UDS: Only tester present ("\x02\x3E\x80\x00\x00\x00\x00\x00") allowed on diagnostics address
   if (msg->addr == 0x7D0U) {
-    if ((GET_BYTES(msg, 0, 4) != 0x00803E02U) || (GET_BYTES(msg, 4, 4) != 0x0U)) {
+    if (GET_BYTES_64_LE(msg, 0, 8) != 0x0000000000803E02ULL) {
       tx = false;
     }
   }
@@ -345,7 +341,7 @@ static bool hyundai_tx_hook(const CANPacket_t *msg) {
   if ((msg->addr == 0x3EFU) && !hyundai_longitudinal) {
     int button = (msg->data[7] >> 4U) & 0x3U;
     bool pause_resume = GET_BIT(msg, 62U);
-    bool no_other_signals = (GET_BYTES(msg, 0, 4) == 0U) && (GET_BYTES(msg, 4, 3) == 0U) && ((msg->data[7] & 0x8FU) == 0U);
+    bool no_other_signals = (GET_BYTES_LE(msg, 0, 4) == 0U) && (GET_BYTES_LE(msg, 4, 3) == 0U) && ((msg->data[7] & 0x8FU) == 0U);
 
     bool allowed_resume = (button == 1) && !pause_resume && controls_allowed;
     bool allowed_set = (button == 2) && !pause_resume && controls_allowed;
@@ -365,16 +361,16 @@ static safety_config hyundai_init(uint16_t param) {
 
   static const CanMsg HYUNDAI_LONG_TX_MSGS[] = {
     HYUNDAI_LONG_COMMON_TX_MSGS(0, false)
-    {0x38D, 0, 8, .check_relay = false}, // FCA11 Bus 0
-    {0x483, 0, 8, .check_relay = false}, // FCA12 Bus 0
-    {0x7D0, 0, 8, .check_relay = false}, // radar UDS TX addr Bus 0 (for radar disable)
+    {0x38D, 0, 8, .check_relay = false},  // FCA11 Bus 0
+    {0x483, 0, 8, .check_relay = false},  // FCA12 Bus 0
+    {0x7D0, 0, 8, .check_relay = false},  // radar UDS TX addr Bus 0 (for radar disable)
   };
 
   static const CanMsg HYUNDAI_LONG_TX_MSGS_REFRESH[] = {
     HYUNDAI_LONG_COMMON_TX_MSGS(0, true)
-    {0x38D, 0, 8, .check_relay = false}, // FCA11 Bus 0
-    {0x483, 0, 8, .check_relay = false}, // FCA12 Bus 0
-    {0x7D0, 0, 8, .check_relay = false}, // radar UDS TX addr Bus 0 (for radar disable)
+    {0x38D, 0, 8, .check_relay = false},  // FCA11 Bus 0
+    {0x483, 0, 8, .check_relay = false},  // FCA12 Bus 0
+    {0x7D0, 0, 8, .check_relay = false},  // radar UDS TX addr Bus 0 (for radar disable)
   };
 
   static const CanMsg HYUNDAI_CAMERA_SCC_TX_MSGS[] = {
@@ -467,7 +463,6 @@ static safety_config hyundai_init(uint16_t param) {
         SET_TX_MSGS(HYUNDAI_LONG_TX_MSGS, ret);
       }
     }
-
   } else if (hyundai_camera_scc) {
     static RxCheck hyundai_cam_scc_rx_checks[] = {
       HYUNDAI_COMMON_RX_CHECKS(false)

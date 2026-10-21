@@ -9,7 +9,7 @@ When merging or cherry-picking another branch, add a row to the tables below.
 | Item | Value |
 |---|---|
 | Base | `origin/master` (mirror of `sunnypilot/opendbc` master, merged periodically) |
-| Last master merge | `b4746ebb` (2026-10-10, master `b2acec1d`) |
+| Last master merge | `335adbf0` (2026-10-21, master `5be75071`) |
 
 ## Merged branches
 
@@ -19,7 +19,8 @@ When merging or cherry-picking another branch, add a row to the tables below.
 | `elantra-2025-port-sp` | Alex4386 (`origin/elantra-2025-port-sp`, `4b316aa4`) | squash (part of `14c49615`) | `14c49615` | sunnypilot version of the branch above, plus initial Inster support |
 | `ax1ev-port-sp` | Alex4386 (`origin/ax1ev-port-sp`, `89c7a3bf`) | squash (part of `14c49615`) | `14c49615` | Inster (AX1EV) port: `ALT_AX1EV_BUTTONS`, `AX1_CRUISE_BUTTONS` / `AX1_LDA_BUTTON`, safety |
 | (LDA hack) | Alex4386 | squash | `14c49615` | Inster LDA button to MADS, split of `_hyundai_can_common.dbc` |
-| `hyundai-radar-tracks` | royjr (`origin/hyundai-radar-tracks`, `82683e54`) | merge | `fcb6405e` | Fingerprint-based Hyundai radar track detection (`500_51F`, `210_21F`, `235_248`, `3A5_3C4`, `602_617`). Inster uses the Mando MRR35 (`0x3A5`-`0x3C4`) on bus 1 |
+| `hyundai-radar-tracks` | royjr (`origin/hyundai-radar-tracks`, `82683e54`) | merge | `335adbf0` | Master merge fixes: AX1EV buttons moved to `msg_matches()`, `CAN_REFRESH_MSGS` / `ALT_AX1EV_BUTTONS` moved to bits 28/29 (`HAS_BSM` took 27), restore `ignore_frequency_check` in `safety_tick()` (dropped by the upstream sync) so the 5 Hz AX1EV button rx checks stay valid |
+| `fcb6405e` | Fingerprint-based Hyundai radar track detection (`500_51F`, `210_21F`, `235_248`, `3A5_3C4`, `602_617`). Inster uses the Mando MRR35 (`0x3A5`-`0x3C4`) on bus 1 |
 
 `14c49615` squashes the `elantra-2025-port` -> `elantra-2025-port-sp` -> `ax1ev-port-sp` line of work into one commit,
 so git ancestry does not connect it to the original branches. The sources were identified by comparing file contents.
