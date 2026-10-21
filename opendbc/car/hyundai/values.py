@@ -19,8 +19,8 @@ Ecu = CarParams.Ecu
 # torque_data/override.toml as well: both values there are per full command. Scale LAT_ACCEL_FACTOR by the same
 # ratio; FRICTION shrinks roughly by the inverse ratio and is best taken from the car's torque learner at the new cap.
 INSTER_STEER_MAX = 384
-INSTER_STEER_DELTA_UP = 2
-INSTER_STEER_DELTA_DOWN = 3
+INSTER_STEER_DELTA_UP = 3
+INSTER_STEER_DELTA_DOWN = 5
 
 # Hyundai Inster default steering delay (CarParams.steerActuatorDelay), in seconds. openpilot adds 0.2 s to it: the
 # lateral delay learner starts from that total until it has learned a value, and with live learning switched off the
