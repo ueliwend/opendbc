@@ -1,7 +1,7 @@
 import unittest
 
 from opendbc.can import CANPacker, CANParser
-from opendbc.car import Bus, gen_empty_fingerprint
+from opendbc.car import Bus, DT_CTRL, gen_empty_fingerprint, structs
 from opendbc.car.can_definitions import CanData
 from opendbc.car.structs import CarParams, CarParamsSP
 from opendbc.car.fw_versions import build_fw_dict
@@ -16,9 +16,11 @@ from opendbc.car.hyundai.values import CAR, DATE_FW_ECUS, \
                                          PLATFORM_CODE_ECUS, HYUNDAI_VERSION_REQUEST_LONG, \
                                          HyundaiFlags, get_platform_codes, HyundaiSafetyFlags, Buttons, DBC, \
                                          NON_SCC_CAR, CarControllerParams, INSTER_STEER_MAX, INSTER_STEER_DELTA_UP, \
-                                         INSTER_STEER_DELTA_DOWN, INSTER_STEER_ACTUATOR_DELAY
+                                         INSTER_STEER_DELTA_DOWN, INSTER_STEER_ACTUATOR_DELAY, INSTER_STEER_MAX_LOOKUP, \
+                                         inster_steer_max
 from opendbc.car.hyundai.fingerprints import FW_VERSIONS
 from opendbc.sunnypilot.car.hyundai.values import HyundaiFlagsSP
+from opendbc.sunnypilot.car.interfaces import setup_interfaces as sunnypilot_setup_interfaces
 from opendbc.testing import fuzzy_test
 
 Ecu = CarParams.Ecu
@@ -278,6 +280,59 @@ class TestHyundaiFingerprint(unittest.TestCase):
     params = CarControllerParams(CP)
     assert (params.STEER_MAX, params.STEER_DELTA_UP, params.STEER_DELTA_DOWN) == \
            (INSTER_STEER_MAX, INSTER_STEER_DELTA_UP, INSTER_STEER_DELTA_DOWN)
+
+  def test_inster_steer_max_table(self):
+    # car-side speed-dependent limit (switch InsterHighTorqueLimits): 450 up to 20 km/h, linear to 430 at 40 km/h, 430 above
+    assert INSTER_STEER_MAX_LOOKUP == ([5.56, 11.11], [450, 430])
+    for v, expected in ((0.0, 450), (5.56, 450), (8.335, 440), (11.11, 430), (40.0, 430)):
+      assert inster_steer_max(v) == expected, (v, inster_steer_max(v))
+    caps = [inster_steer_max(v / 100) for v in range(5000)]
+    assert all(a >= b for a, b in zip(caps, caps[1:], strict=False))  # non-increasing with speed
+    assert min(caps) > INSTER_STEER_MAX
+
+  def _inster_interface(self, params_list):
+    fingerprint = gen_empty_fingerprint()
+    CP = CarInterface.get_params(CAR.HYUNDAI_INSTER, fingerprint, [], False, False, False)
+    CP_SP = CarInterface.get_params_sp(CP, CAR.HYUNDAI_INSTER, fingerprint, [], False, False, False)
+    sunnypilot_setup_interfaces(CarInterface, CP, CP_SP, params_list)
+    return CarInterface(CP, CP_SP)
+
+  def test_inster_high_torque_flag(self):
+    # the switch reaches the car side as HyundaiFlagsSP.INSTER_HIGH_TORQUE, for the Inster only
+    fingerprint = gen_empty_fingerprint()
+    for car_model in (CAR.HYUNDAI_INSTER, CAR.HYUNDAI_KONA_EV, CAR.KIA_CEED):
+      for switch in (None, False, True):
+        CP = CarInterface.get_params(car_model, fingerprint, [], False, False, False)
+        CP_SP = CarInterface.get_params_sp(CP, car_model, fingerprint, [], False, False, False)
+        sunnypilot_setup_interfaces(CarInterface, CP, CP_SP, [] if switch is None else [{"InsterHighTorqueLimits": switch}])
+        expected = bool(switch) and car_model == CAR.HYUNDAI_INSTER
+        assert bool(CP_SP.flags & HyundaiFlagsSP.INSTER_HIGH_TORQUE) == expected, (car_model, switch)
+
+  def test_inster_high_torque_car_controller(self):
+    # switch off: the cap stays 384 (unchanged); switch on: the cap follows the speed table; actuators.torque stays 1.0 = 384 raw
+    for switch in (False, True):
+      for v in (0.0, 5.0, 8.0, 10.0, 12.0, 30.0):
+        CI = self._inster_interface([{"InsterHighTorqueLimits": switch}])
+        CC = structs.CarControl()
+        CC.enabled = True
+        CC.latActive = True
+        CC.actuators.torque = -1.5
+        CC = CC.as_reader()
+        CC_SP = structs.CarControlSP()
+        now_nanos = 0
+        outputs = []
+        for _ in range(200):
+          CI.update([])
+          CI.CS.out.vEgoRaw = v
+          CI.CS.out.steeringTorque = 0
+          actuators, _ = CI.apply(CC, CC_SP, now_nanos)
+          outputs.append(actuators.torqueOutputCan)
+          now_nanos += int(DT_CTRL * 1e9)
+        expected = inster_steer_max(v) if switch else INSTER_STEER_MAX
+        assert outputs[-1] == -expected, (switch, v, outputs[-1])
+        self.assertAlmostEqual(actuators.torque, -expected / INSTER_STEER_MAX, places=6)
+        # ramp 3 up per frame
+        assert outputs[:3] == [-3, -6, -9]
 
   def test_inster_steer_actuator_delay(self):
     # The Inster has its own default steering delay (INSTER_STEER_ACTUATOR_DELAY); the other cars keep theirs

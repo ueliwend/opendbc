@@ -34,3 +34,4 @@ class HyundaiFlagsSP(IntFlag):
   RADAR_OFF = 2 ** 11
   RADAR_LEAD_ONLY = 2 ** 12
   RADAR_FULL_RADAR = 2 ** 13
+  INSTER_HIGH_TORQUE = 2 ** 14  # Hyundai Inster: speed-dependent steering torque limit (sunnypilot switch InsterHighTorqueLimits)

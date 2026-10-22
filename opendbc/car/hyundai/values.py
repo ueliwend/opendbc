@@ -14,13 +14,37 @@ Ecu = CarParams.Ecu
 
 
 # Hyundai Inster steering limits, in raw LKAS11 torque units and per 10 ms frame.
-# The panda enforces the same numbers in opendbc/safety/modes/hyundai.h (HYUNDAI_INSTER_STEER_*); change both
-# together (the safety test fails if they differ). When changing INSTER_STEER_MAX, update HYUNDAI_INSTER in
+# The panda enforces the same ramps and the speed-dependent table INSTER_STEER_MAX_LOOKUP below in
+# opendbc/safety/modes/hyundai.h (HYUNDAI_INSTER_STEER_*); change both together (the safety test fails if they
+# differ). The panda's table is at or above INSTER_STEER_MAX at every speed. When changing INSTER_STEER_MAX, update HYUNDAI_INSTER in
 # torque_data/override.toml as well: both values there are per full command. Scale LAT_ACCEL_FACTOR by the same
 # ratio; FRICTION shrinks roughly by the inverse ratio and is best taken from the car's torque learner at the new cap.
 INSTER_STEER_MAX = 384
 INSTER_STEER_DELTA_UP = 3
 INSTER_STEER_DELTA_DOWN = 5
+
+# Hyundai Inster speed-dependent steering torque limit (owner-approved experimental exception, 22 Oct 2026), raw LKAS11 units:
+# 450 up to 20 km/h, linear to 430 at 40 km/h, 430 above. The panda always allows this table (HYUNDAI_INSTER_STEER_LOOKUP_* in
+# hyundai.h, with the usual 1 m/s speed and 1 raw margin of the dynamic torque check). The car side uses it only with the sunnypilot
+# switch "InsterHighTorqueLimits" (HyundaiFlagsSP.INSTER_HIGH_TORQUE); otherwise it keeps the cap INSTER_STEER_MAX. INSTER_STEER_MAX
+# stays the full-scale command (actuators.torque 1.0 = 384 raw), so controller gains, feed-forward tables and the torque learner keep
+# their meaning; with the switch on, openpilot may request up to inster_steer_max(v) / INSTER_STEER_MAX (> 1.0).
+INSTER_STEER_MAX_LOOKUP = ([5.56, 11.11], [450, 430])  # m/s, raw
+# Highest lateral acceleration request (m/s^2, without roll) openpilot plans for the Inster with the switch on (instead of the ISO 11270
+# 3.0); also MAX_LAT_ACCEL_MEASURED of HYUNDAI_INSTER in torque_data/override.toml.
+INSTER_HIGH_TORQUE_MAX_LATERAL_ACCEL = 3.3
+
+
+def inster_steer_max(v_ego: float) -> int:
+  """Car-side steering torque limit (raw) of the Inster at speed v_ego (m/s) with the switch InsterHighTorqueLimits on.
+  Never above the panda's table, which is evaluated 1 m/s lower and allows 1 raw more."""
+  speeds, limits = INSTER_STEER_MAX_LOOKUP
+  if v_ego <= speeds[0]:
+    return limits[0]
+  if v_ego >= speeds[-1]:
+    return limits[-1]
+  return int(round(limits[0] + (limits[1] - limits[0]) * (v_ego - speeds[0]) / (speeds[1] - speeds[0])))
+
 
 # Hyundai Inster default steering delay (CarParams.steerActuatorDelay), in seconds. openpilot adds 0.2 s to it: the
 # lateral delay learner starts from that total until it has learned a value, and with live learning switched off the
@@ -50,7 +74,8 @@ class CarControllerParams:
       self.STEER_DELTA_UP = 2
       self.STEER_DELTA_DOWN = 3
 
-    # Hyundai Inster: its own limit entry (INSTER_STEER_* above) so it can be tuned on its own
+    # Hyundai Inster: its own limit entry (INSTER_STEER_* above) so it can be tuned on its own. STEER_MAX is the full-scale command
+    # and the cap; with HyundaiFlagsSP.INSTER_HIGH_TORQUE the car controller caps at inster_steer_max(v) instead (see above)
     elif CP.flags & HyundaiFlags.INSTER_LIMITS:
       self.STEER_MAX = INSTER_STEER_MAX
       self.STEER_DELTA_UP = INSTER_STEER_DELTA_UP
