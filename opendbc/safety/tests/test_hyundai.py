@@ -5,8 +5,7 @@ import unittest
 
 import numpy as np
 
-from opendbc.car.hyundai.values import HyundaiSafetyFlags, INSTER_STEER_MAX, INSTER_STEER_DELTA_UP, INSTER_STEER_DELTA_DOWN, \
-                                       INSTER_STEER_MAX_LOOKUP, inster_steer_max
+from opendbc.car.hyundai.values import HyundaiSafetyFlags, INSTER_STEER_MAX, INSTER_STEER_DELTA_UP, INSTER_STEER_DELTA_DOWN
 from opendbc.car.structs import CarParams
 import opendbc.safety.tests.common as common
 from opendbc.safety.tests.libsafety import libsafety_py
@@ -270,178 +269,14 @@ class TestHyundaiSafetyAltLimits2(TestHyundaiSafety):
     self.safety.set_current_safety_param_sp(self.SAFETY_PARAM_SP)
 
 
-class InsterSteeringLimitsMixin:
-  """Hyundai Inster steering limits: the speed-dependent torque limit (owner-approved experimental exception: 450 raw up to 20 km/h,
-  linear to 430 at 40 km/h, 430 above; the panda evaluates it 1 m/s below the lowest recent wheel speed and allows 1 more), ramps 3 up
-  / 5 down, and the common Hyundai real-time and driver-override rules. Uses the openpilot-side values, so the test fails if hyundai.h
-  and values.py drift apart."""
+@parameterized_class(LDA_BUTTON)
+class TestHyundaiSafetyInsterLimits(TestHyundaiSafety):
+  SAFETY_PARAM = HyundaiSafetyFlags.INSTER_LIMITS
+
+  # uses the openpilot-side values, so the test fails if hyundai.h and values.py drift apart
   MAX_RATE_UP = INSTER_STEER_DELTA_UP
   MAX_RATE_DOWN = INSTER_STEER_DELTA_DOWN
-  MAX_TORQUE_LOOKUP = INSTER_STEER_MAX_LOOKUP
-  DYNAMIC_MAX_TORQUE = True
-
-  def _speed_msg(self, speed):
-    # vehicle speed in m/s: with the Inster limits the panda averages the 4 wheel speeds of WHL_SPD11 (0.03125 km/h per bit)
-    values = {"WHL_SPD_%s" % s: speed * 3.6 for s in ["FL", "FR", "RL", "RR"]}
-    values["WHL_SPD_AliveCounter_LSB"] = (self.cnt_speed % 16) & 0x3
-    values["WHL_SPD_AliveCounter_MSB"] = (self.cnt_speed % 16) >> 2
-    self.__class__.cnt_speed += 1
-    return self.packer.make_can_msg_safety("WHL_SPD11", 0, values, fix_checksum=checksum)
-
-  def _vehicle_moving_msg(self, speed):
-    # vehicle_moving compares raw wheel speeds with the standstill threshold (raw units)
-    return TestHyundaiSafety._speed_msg(self, speed)
-
-  def _panda_max_torque(self):
-    # the panda's limit for the speed it measured: float32 interpolation at (lowest sample - 1 m/s), + 1, truncated, clamped to 450
-    v_min = round(float(self.safety.get_vehicle_speed_min()) * 1000)
-    x = np.float32(v_min / 1000.0 - 1.0)
-    (x0, x1), (y0, y1) = [np.float32(a) for a in INSTER_STEER_MAX_LOOKUP[0]], [np.float32(a) for a in INSTER_STEER_MAX_LOOKUP[1]]
-    if x <= x0:
-      y = y0
-    elif x < x1:
-      y = np.float32(np.float32(np.float32(y1 - y0) * np.float32(x - x0)) / np.float32(x1 - x0)) + y0
-    else:
-      y = y1
-    return min(int(np.float32(y + np.float32(1))), max(INSTER_STEER_MAX_LOOKUP[1]))
-
-  def _get_max_torque(self, speed):
-    # the generic helper uses the requested speed; the panda sees it quantised to the wheel speed resolution (0.0087 m/s)
-    expected = super()._get_max_torque(speed)
-    measured = self._panda_max_torque()
-    assert abs(expected - measured) <= 1, (speed, expected, measured)
-    return measured
-
-  def _max_allowed_torque(self, speed):
-    # largest torque the panda accepts at this speed, from rest (previous torque set to the candidate, no driver torque)
-    self._reset_speed_measurement(speed)
-    self._reset_torque_driver_measurement(0)
-    self.safety.set_controls_allowed(True)
-    allowed = 0
-    for t in range(380, 470):
-      self._set_prev_torque(t)
-      if self._tx(self._torque_cmd_msg(t)):
-        allowed = t
-    return allowed
-
-  def test_inster_torque_table_edges(self):
-    # (speed m/s, panda limit): 450 + 1 clamped to 450 up to 6.56 m/s (20 km/h + 1 m/s margin), 430 + 1 from 12.11 m/s
-    for speed, expected in ((0.0, 450), (3.0, 450), (6.4, 450), (8.0, 445), (10.0, 438), (12.2, 431), (20.0, 431), (40.0, 431)):
-      with self.subTest(speed=speed):
-        self.assertEqual(expected, self._max_allowed_torque(speed))
-
-  def test_inster_car_side_limit_always_allowed(self):
-    # the car side (values.inster_steer_max at the same speed) is never above what the panda allows, and close to it
-    for speed in np.arange(0.0, 45.0, 0.25):
-      self._reset_speed_measurement(speed)
-      self._reset_torque_driver_measurement(0)
-      self.safety.set_controls_allowed(True)
-      cap = inster_steer_max(float(speed))
-      panda = self._panda_max_torque()
-      self.assertTrue(INSTER_STEER_MAX < cap <= panda <= cap + 6, (speed, cap, panda))
-      for sign in (-1, 1):
-        self._set_prev_torque(sign * cap)
-        self.assertTrue(self._tx(self._torque_cmd_msg(sign * cap)))
-
-  def test_inster_ramp_within_realtime_limit(self):
-    # ramping up at 3 / frame from 0 to the low-speed limit and down at 5 / frame to 0 stays within the real-time limit (112 per
-    # 250 ms: 25 frames x 3 = 75), so the real-time check never cuts what the ramp allows; a faster ramp up is blocked (the down rate
-    # is the minimum wind-down against the driver, tested in test_against_torque_driver)
-    self._reset_speed_measurement(0)
-    self._reset_torque_driver_measurement(0)
-    self.safety.set_controls_allowed(True)
-    self._set_prev_torque(0)
-    t_us = 0
-    torque = 0
-    frames = 0
-    while torque < 450:
-      torque = min(torque + self.MAX_RATE_UP, 450)
-      t_us += 10000
-      frames += 1
-      self.safety.set_timer(t_us)
-      self.assertTrue(self._tx(self._torque_cmd_msg(torque)), torque)
-    self.assertEqual(150, frames)
-    while torque > 0:
-      torque = max(torque - self.MAX_RATE_DOWN, 0)
-      t_us += 10000
-      self.safety.set_timer(t_us)
-      self.assertTrue(self._tx(self._torque_cmd_msg(torque)), torque)
-    self._set_prev_torque(440)
-    self.assertFalse(self._tx(self._torque_cmd_msg(440 + self.MAX_RATE_UP + 1)))
-
-  def test_inster_speed_rises_with_torque_held(self):
-    # holding 450 while the speed rises: accepted while the panda's limit is still 450, blocked as soon as it drops below
-    self._reset_torque_driver_measurement(0)
-    self.safety.set_controls_allowed(True)
-    self._reset_speed_measurement(0.0)
-    blocked_at = None
-    for speed in np.arange(0.0, 15.0, 0.25):
-      self._reset_speed_measurement(speed)
-      self._set_prev_torque(450)
-      ok = self._tx(self._torque_cmd_msg(450))
-      self.assertEqual(ok, self._panda_max_torque() >= 450, speed)
-      if not ok and blocked_at is None:
-        blocked_at = speed
-    self.assertIsNotNone(blocked_at)
-    self.assertTrue(6.5 <= blocked_at <= 7.0, blocked_at)   # 5.56 m/s + 1 m/s margin
-    # once blocked at speed, the panda wants the request back within its (lower) limit
-    self._reset_speed_measurement(15.0)
-    self._set_prev_torque(450)
-    self.assertFalse(self._tx(self._torque_cmd_msg(450)))
-    self._set_prev_torque(450)
-    self.assertFalse(self._tx(self._torque_cmd_msg(432)))
-    self._set_prev_torque(431)
-    self.assertTrue(self._tx(self._torque_cmd_msg(431)))
-
-  def test_inster_car_side_follows_rising_speed(self):
-    # car-like: start at 450 at 4 m/s and accelerate at 3 m/s^2 to 15 m/s (one wheel-speed message per 10 ms frame); the car side
-    # caps at inster_steer_max(v) and may wind down 5 per frame: every frame is accepted, and the command ends at 430
-    self._reset_torque_driver_measurement(0)
-    self.safety.set_controls_allowed(True)
-    self._reset_speed_measurement(4.0)
-    self._set_prev_torque(450)
-    torque, speed, t_us = 450, 4.0, 0
-    while speed < 15.0:
-      speed += 0.03
-      t_us += 10000
-      self.safety.set_timer(t_us)
-      self._rx(self._speed_msg(speed))
-      torque = max(min(torque, inster_steer_max(speed)), torque - self.MAX_RATE_DOWN)
-      self.assertTrue(self._tx(self._torque_cmd_msg(torque)), (speed, torque))
-    self.assertEqual(430, torque)
-
-  def test_inster_driver_override_at_table_edges(self):
-    # driver-override rule unchanged (allowance 50, factor 2), relative to the speed-dependent limit: at the limit, opposing driver
-    # torque above the allowance forces a wind-down of 2 raw per raw of driver torque
-    for speed in (0.0, 8.0, 20.0):
-      max_torque = self._max_allowed_torque(speed)
-      for sign in (-1, 1):
-        self._reset_torque_driver_measurement(-50 * sign)
-        self._set_prev_torque(max_torque * sign)
-        self.assertTrue(self._tx(self._torque_cmd_msg(max_torque * sign)))
-        self._reset_torque_driver_measurement(-60 * sign)
-        self._set_prev_torque(max_torque * sign)
-        self.assertFalse(self._tx(self._torque_cmd_msg(max_torque * sign)))
-        self._set_prev_torque(max_torque * sign)
-        self.assertTrue(self._tx(self._torque_cmd_msg((max_torque - 20) * sign)))
-
-  def test_inster_no_speed_sampling_without_flag(self):
-    # other Hyundai CAN configurations do not sample the vehicle speed (unchanged)
-    self.safety.set_safety_hooks(CarParams.SafetyModel.hyundai, self.SAFETY_PARAM & ~HyundaiSafetyFlags.INSTER_LIMITS)
-    self.safety.init_tests()
-    for _ in range(6):
-      self._rx(self._speed_msg(10.0))
-    self.assertEqual(0.0, self.safety.get_vehicle_speed_min())
-    self.safety.set_safety_hooks(CarParams.SafetyModel.hyundai, self.SAFETY_PARAM)
-    self.safety.init_tests()
-    for _ in range(6):
-      self._rx(self._speed_msg(10.0))
-    self.assertAlmostEqual(10.0, self.safety.get_vehicle_speed_min(), delta=0.01)
-
-
-@parameterized_class(LDA_BUTTON)
-class TestHyundaiSafetyInsterLimits(InsterSteeringLimitsMixin, TestHyundaiSafety):
-  SAFETY_PARAM = HyundaiSafetyFlags.INSTER_LIMITS
+  MAX_TORQUE_LOOKUP = [0], [INSTER_STEER_MAX]
 
   @classmethod
   def setUpClass(cls):
@@ -452,6 +287,19 @@ class TestHyundaiSafetyInsterLimits(InsterSteeringLimitsMixin, TestHyundaiSafety
   def setUp(self):
     super().setUp()
     self.safety.set_current_safety_param_sp(self.SAFETY_PARAM_SP)
+
+  def test_inster_static_409_at_every_speed(self):
+    # the Inster's limit is a fixed 409 raw (no speed dependence): 409 accepted, 410 refused, whatever the wheel speed
+    assert INSTER_STEER_MAX == 409
+    self._reset_torque_driver_measurement(0)
+    self.safety.set_controls_allowed(True)
+    for speed_raw in (0, 12, 640, 1280, 2560, 5120, 12000, 16000):    # WHL_SPD11 raw (0.03125 km/h per bit): 0 to 500 km/h
+      self._reset_speed_measurement(speed_raw)
+      for sign in (-1, 1):
+        self._set_prev_torque(409 * sign)
+        self.assertTrue(self._tx(self._torque_cmd_msg(409 * sign)))
+        self._set_prev_torque(410 * sign)
+        self.assertFalse(self._tx(self._torque_cmd_msg(410 * sign)))
 
 
 @parameterized_class(LDA_BUTTON)
@@ -669,13 +517,54 @@ class TestHyundaiSafetyAltAx1evLdaButton(TestHyundaiSafetyCameraSCC):
       self.assertEqual(0, self.safety.safety_fwd_hook(2, addr))
 
 
-class TestHyundaiSafetyInsterFullConfig(InsterSteeringLimitsMixin, TestHyundaiSafetyAltAx1evLdaButton):
+class TestHyundaiSafetyInsterFullConfig(TestHyundaiSafetyAltAx1evLdaButton):
   # the Inster's own configuration (safety param 7177: EV gas, camera SCC, CAN refresh messages, AX1EV buttons, Inster limits)
   SAFETY_PARAM = HyundaiSafetyFlags.EV_GAS | HyundaiSafetyFlags.CAMERA_SCC | HyundaiSafetyFlags.CAN_REFRESH_MSGS | \
                  HyundaiSafetyFlags.ALT_AX1EV_BUTTONS | HyundaiSafetyFlags.INSTER_LIMITS
+  MAX_RATE_UP = INSTER_STEER_DELTA_UP
+  MAX_RATE_DOWN = INSTER_STEER_DELTA_DOWN
+  MAX_TORQUE_LOOKUP = [0], [INSTER_STEER_MAX]
 
   def test_safety_param_is_the_cars(self):
     self.assertEqual(7177, int(self.SAFETY_PARAM))
+
+  def test_inster_static_409_at_every_speed(self):
+    TestHyundaiSafetyInsterLimits.test_inster_static_409_at_every_speed(self)
+
+  def test_inster_car_controller_never_blocked(self):
+    # closed loop: the real Hyundai car controller (CarInterface.apply) -> its LKAS11 bytes -> this safety mode, with the same driver
+    # torque on both sides; requests wander and jump up to +-1.6 (above the cap): the panda never blocks a frame and 409 is reached
+    from opendbc.car import DT_CTRL, gen_empty_fingerprint, structs
+    from opendbc.car.hyundai.interface import CarInterface
+    from opendbc.car.hyundai.values import CAR
+    fingerprint = gen_empty_fingerprint()
+    CP = CarInterface.get_params(CAR.HYUNDAI_INSTER, fingerprint, [], False, False, False)
+    CP_SP = CarInterface.get_params_sp(CP, CAR.HYUNDAI_INSTER, fingerprint, [], False, False, False)
+    self.assertEqual(int(CP.safetyConfigs[-1].safetyParam), int(self.SAFETY_PARAM))
+    CI = CarInterface(CP, CP_SP)
+    self.safety.set_controls_allowed(True)
+    rnd = random.Random(409)
+    req, drv, now, sent, max_cmd = 0.0, 0.0, 0, 0, 0
+    for _ in range(3000):
+      req = rnd.uniform(-1.6, 1.6) if rnd.random() < 0.02 else float(np.clip(req + rnd.gauss(0, 0.05), -1.6, 1.6))
+      drv = rnd.choice([0.0, rnd.uniform(-300, 300)]) if rnd.random() < 0.01 else float(np.clip(drv + rnd.gauss(0, 4), -300, 300))
+      self._rx(self._torque_driver_msg(int(round(drv))))
+      CI.update([])
+      CI.CS.out.steeringTorque = int(round(drv))
+      CC = structs.CarControl()
+      CC.enabled = True
+      CC.latActive = True
+      CC.actuators.torque = req
+      actuators, can_sends = CI.apply(CC.as_reader(), structs.CarControlSP(), now)
+      now += int(DT_CTRL * 1e9)
+      self.safety.set_timer(int(now / 1000) % (2 ** 32))
+      for addr, dat, bus in can_sends:
+        if addr == 0x340:
+          sent += 1
+          max_cmd = max(max_cmd, abs(actuators.torqueOutputCan))
+          self.assertTrue(self._tx(libsafety_py.make_CANPacket(addr, bus, bytes(dat))), (req, drv, actuators.torqueOutputCan))
+    self.assertEqual(3000, sent)
+    self.assertEqual(INSTER_STEER_MAX, max_cmd)
 
 
 class TestHyundaiLegacySafety(TestHyundaiSafety):

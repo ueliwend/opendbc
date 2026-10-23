@@ -128,8 +128,8 @@ legend = ["LAT_ACCEL_FACTOR", "MAX_LAT_ACCEL_MEASURED", "FRICTION"]
 # Friction: get_friction multiplies it by the factor and the torque controller divides by the factor again, so
 # it is a share of the full command too, not a lateral acceleration. torqued on the same drive with the torque in
 # 384 units gives 0.085 (live estimate on the car at 384, 15 Oct 2026: 0.084); 0.11 was too strong at 384.
-# MAX_LAT_ACCEL_MEASURED: owner decision (20 / 22 Oct 2026), replacing the HYUNDAI_KONA_EV value 2.31: the highest lateral
-# acceleration the speed-dependent torque limit (switch InsterHighTorqueLimits, values.py INSTER_STEER_MAX_LOOKUP) is meant to
-# reach, = INSTER_HIGH_TORQUE_MAX_LATERAL_ACCEL. Above ISO 11270's 3.0: an owner-approved experimental exception for this car only
-# (see tests/test_lateral_limits.py).
+# MAX_LAT_ACCEL_MEASURED: 3.3 (owner decision 20-23 Oct 2026, replacing the HYUNDAI_KONA_EV value 2.31), the highest lateral
+# acceleration at the cap INSTER_STEER_MAX (409 raw): route 0000007f held 3.1-3.45 at 40-60 km/h at 409. Must equal
+# INSTER_MAX_LAT_ACCEL_MEASURED in hyundai/values.py (tested). Above ISO 11270's 3.0: an owner-approved experimental exception for
+# this car only (see tests/test_lateral_limits.py).
 "HYUNDAI_INSTER" = [3.7, 3.3, 0.085]

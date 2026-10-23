@@ -5,7 +5,7 @@ from opendbc.car.lateral import apply_driver_steer_torque_limits, common_fault_a
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.hyundai import hyundaicanfd, hyundaican
 from opendbc.car.hyundai.hyundaicanfd import CanBus
-from opendbc.car.hyundai.values import HyundaiFlags, Buttons, CarControllerParams, CAR, inster_steer_max
+from opendbc.car.hyundai.values import HyundaiFlags, Buttons, CarControllerParams, CAR
 from opendbc.car.interfaces import CarControllerBase
 
 from opendbc.sunnypilot.car.hyundai.escc import EsccCarController
@@ -13,7 +13,6 @@ from opendbc.sunnypilot.car.hyundai.icbm import IntelligentCruiseButtonManagemen
 from opendbc.sunnypilot.car.hyundai.longitudinal.controller import LongitudinalController
 from opendbc.sunnypilot.car.hyundai.lead_data_ext import LeadDataCarController
 from opendbc.sunnypilot.car.hyundai.mads import MadsCarController
-from opendbc.sunnypilot.car.hyundai.values import HyundaiFlagsSP
 
 VisualAlert = structs.CarControl.HUDControl.VisualAlert
 LongCtrlState = structs.CarControl.Actuators.LongControlState
@@ -68,9 +67,6 @@ class CarController(CarControllerBase, EsccCarController, LeadDataCarController,
     self.params = CarControllerParams(CP)
     self.packer = CANPacker(dbc_names[Bus.pt])
     self.angle_limit_counter = 0
-    # Hyundai Inster, sunnypilot switch InsterHighTorqueLimits (experimental): speed-dependent torque limit (values.inster_steer_max)
-    # instead of the cap STEER_MAX; actuators.torque stays normalised to STEER_MAX (1.0 = 384 raw) and may exceed 1.0
-    self.inster_high_torque = bool(CP.flags & HyundaiFlags.INSTER_LIMITS) and bool(CP_SP.flags & HyundaiFlagsSP.INSTER_HIGH_TORQUE)
 
     self.accel_last = 0
     self.apply_torque_last = 0
@@ -89,12 +85,9 @@ class CarController(CarControllerBase, EsccCarController, LeadDataCarController,
     hud_control = CC.hudControl
 
     # steering torque
-    new_torque = int(round(actuators.torque * self.params.STEER_MAX))
-    if self.inster_high_torque:
-      apply_torque = apply_driver_steer_torque_limits(new_torque, self.apply_torque_last, CS.out.steeringTorque, self.params,
-                                                      inster_steer_max(CS.out.vEgoRaw))
-    else:
-      apply_torque = apply_driver_steer_torque_limits(new_torque, self.apply_torque_last, CS.out.steeringTorque, self.params)
+    # actuators.torque 1.0 = STEER_FULL_SCALE raw (= STEER_MAX for every car but the Inster: 384 there, cap STEER_MAX 409)
+    new_torque = int(round(actuators.torque * self.params.STEER_FULL_SCALE))
+    apply_torque = apply_driver_steer_torque_limits(new_torque, self.apply_torque_last, CS.out.steeringTorque, self.params)
 
     # >90 degree steering fault prevention
     self.angle_limit_counter, apply_steer_req = common_fault_avoidance(abs(CS.out.steeringAngleDeg) >= MAX_ANGLE, CC.latActive,
@@ -148,7 +141,7 @@ class CarController(CarControllerBase, EsccCarController, LeadDataCarController,
     can_sends.extend(IntelligentCruiseButtonManagementInterface.update(self, CS, CC_SP, self.packer, self.frame, self.last_button_frame, self.CAN))
 
     new_actuators = actuators.as_builder()
-    new_actuators.torque = apply_torque / self.params.STEER_MAX
+    new_actuators.torque = apply_torque / self.params.STEER_FULL_SCALE
     new_actuators.torqueOutputCan = apply_torque
     new_actuators.accel = self.tuning.actual_accel
 

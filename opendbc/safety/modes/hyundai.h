@@ -4,20 +4,15 @@
 #include "opendbc/safety/modes/hyundai_common.h"
 
 // Hyundai Inster steering limits (raw LKAS11 torque units, per 10 ms frame).
-// Keep in sync with INSTER_STEER_DELTA_* and INSTER_STEER_MAX_LOOKUP in opendbc/car/hyundai/values.py.
-// Speed-dependent torque limit (owner-approved experimental exception for this car): 450 up to 5.56 m/s (20 km/h), linear to 430
-// at 11.11 m/s (40 km/h), 430 above. steer_torque_cmd_checks evaluates the table at the lowest of the last wheel speed samples
-// minus 1 m/s and allows 1 more; safety_interpolate holds the end values outside the breakpoints. The car side caps at 384 unless
-// the sunnypilot switch InsterHighTorqueLimits is on (then at the same table, without the margins).
-#define HYUNDAI_INSTER_STEER_MAX_LOW_SPEED 450
-#define HYUNDAI_INSTER_STEER_MAX_HIGH_SPEED 430
-#define HYUNDAI_INSTER_STEER_LOOKUP_SPEED_LOW 5.56f    // m/s (float: struct lookup_t)
-#define HYUNDAI_INSTER_STEER_LOOKUP_SPEED_HIGH 11.11f  // m/s
+// Keep in sync with INSTER_STEER_* in opendbc/car/hyundai/values.py.
+// 409: the EPS limit is a level; lowest faulting command 417, highest fault-free 409 (held up to 2.45 s; routes 00000072 and
+// 0000007f, 23 Oct 2026), estimate 410-414. Owner-approved experimental exception for this car only.
+#define HYUNDAI_INSTER_STEER_MAX 409
 #define HYUNDAI_INSTER_STEER_DELTA_UP 3
 #define HYUNDAI_INSTER_STEER_DELTA_DOWN 5
 
-// limits shared by all Hyundai CAN torque limit entries, apart from the torque limit
-#define HYUNDAI_LIMITS_COMMON(rate_up, rate_down) \
+#define HYUNDAI_LIMITS(steer, rate_up, rate_down) { \
+  .max_torque = (steer), \
   .max_rate_up = (rate_up), \
   .max_rate_down = (rate_down), \
   .max_rt_delta = 112, \
@@ -30,10 +25,6 @@
   .max_invalid_request_frames = 2, \
   .min_valid_request_rt_interval = 810000,  /* 810ms; a ~10% buffer on cutting every 90 frames */ \
   .has_steer_req_tolerance = true, \
-
-#define HYUNDAI_LIMITS(steer, rate_up, rate_down) { \
-  .max_torque = (steer), \
-  HYUNDAI_LIMITS_COMMON(rate_up, rate_down) \
 }
 
 extern const LongitudinalLimits HYUNDAI_LONG_LIMITS;
@@ -239,13 +230,6 @@ static void hyundai_rx_hook(const CANPacket_t *msg) {
     uint32_t front_left_speed = GET_BYTES_LE(msg, 0, 2) & 0x3FFFU;
     uint32_t rear_right_speed = GET_BYTES_LE(msg, 6, 2) & 0x3FFFU;
     vehicle_moving = (front_left_speed > HYUNDAI_STANDSTILL_THRSLD) || (rear_right_speed > HYUNDAI_STANDSTILL_THRSLD);
-
-    // Inster: vehicle speed for its speed-dependent steering torque limit, average of all 4 wheel speeds (raw * 0.03125 / 3.6 = m/s)
-    if (hyundai_inster_limits) {
-      uint32_t front_right_speed = GET_BYTES_LE(msg, 2, 2) & 0x3FFFU;
-      uint32_t rear_left_speed = GET_BYTES_LE(msg, 4, 2) & 0x3FFFU;
-      UPDATE_VEHICLE_SPEED((front_left_speed + front_right_speed + rear_left_speed + rear_right_speed) / 4.0 * 0.03125 * KPH_TO_MS);
-    }
   }
 
   if (msg_matches(msg, 0x394U, 0U)) {
@@ -277,15 +261,8 @@ static bool hyundai_tx_hook(const CANPacket_t *msg) {
   const TorqueSteeringLimits HYUNDAI_STEERING_LIMITS = HYUNDAI_LIMITS(384, 3, 7);
   const TorqueSteeringLimits HYUNDAI_STEERING_LIMITS_ALT = HYUNDAI_LIMITS(270, 2, 3);
   const TorqueSteeringLimits HYUNDAI_STEERING_LIMITS_ALT_2 = HYUNDAI_LIMITS(170, 2, 3);
-  const TorqueSteeringLimits HYUNDAI_STEERING_LIMITS_INSTER = {
-    .max_torque = HYUNDAI_INSTER_STEER_MAX_LOW_SPEED,
-    .dynamic_max_torque = true,
-    .max_torque_lookup = {
-      {HYUNDAI_INSTER_STEER_LOOKUP_SPEED_LOW, HYUNDAI_INSTER_STEER_LOOKUP_SPEED_HIGH, HYUNDAI_INSTER_STEER_LOOKUP_SPEED_HIGH},
-      {HYUNDAI_INSTER_STEER_MAX_LOW_SPEED, HYUNDAI_INSTER_STEER_MAX_HIGH_SPEED, HYUNDAI_INSTER_STEER_MAX_HIGH_SPEED},
-    },
-    HYUNDAI_LIMITS_COMMON(HYUNDAI_INSTER_STEER_DELTA_UP, HYUNDAI_INSTER_STEER_DELTA_DOWN)
-  };
+  const TorqueSteeringLimits HYUNDAI_STEERING_LIMITS_INSTER = HYUNDAI_LIMITS(HYUNDAI_INSTER_STEER_MAX, HYUNDAI_INSTER_STEER_DELTA_UP,
+                                                                             HYUNDAI_INSTER_STEER_DELTA_DOWN);
 
   bool tx = true;
 

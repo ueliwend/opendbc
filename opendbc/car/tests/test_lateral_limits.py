@@ -6,7 +6,7 @@ from opendbc.testing import parameterized_class
 
 from opendbc.car import DT_CTRL
 from opendbc.car.car_helpers import interfaces
-from opendbc.car.hyundai.values import INSTER_HIGH_TORQUE_MAX_LATERAL_ACCEL, INSTER_STEER_MAX_LOOKUP
+from opendbc.car.hyundai.values import INSTER_MAX_LAT_ACCEL_MEASURED, INSTER_STEER_MAX, INSTER_STEER_FULL_SCALE
 from opendbc.car.interfaces import get_torque_params
 from opendbc.car.lateral import ISO_LATERAL_ACCEL
 from opendbc.car.values import PLATFORMS
@@ -19,11 +19,10 @@ MAX_LAT_JERK_UP_TOLERANCE = 0.5  # m/s^3
 # jerk is measured over half a second
 JERK_MEAS_T = 0.5
 
-# Owner-approved experimental exception (Hyundai Inster, 20 / 22 Oct 2026; nothing else is exempt): its MAX_LAT_ACCEL_MEASURED is
-# the highest lateral acceleration of its speed-dependent torque limit (sunnypilot switch InsterHighTorqueLimits), 3.3 m/s^2, above
-# ISO 11270's 3.0. The jerk rules still apply in full: at its cap of 384 and at every cap of the speed-dependent table (430-450 raw)
-# with its ramps, see TestInsterLateralLimitsException.
-MAX_LAT_ACCEL_EXCEPTIONS = {'HYUNDAI_INSTER': INSTER_HIGH_TORQUE_MAX_LATERAL_ACCEL}
+# Owner-approved experimental exception (Hyundai Inster, 20-23 Oct 2026; nothing else is exempt): its MAX_LAT_ACCEL_MEASURED is a
+# placeholder for the lateral acceleration at its cap of 409 raw, above ISO 11270's 3.0. The jerk rules still apply in full, see
+# TestInsterLateralLimitsException.
+MAX_LAT_ACCEL_EXCEPTIONS = {'HYUNDAI_INSTER': INSTER_MAX_LAT_ACCEL_MEASURED}
 
 
 @parameterized_class('car_model', [(c,) for c in sorted(PLATFORMS)])
@@ -79,24 +78,24 @@ class TestLateralLimits(unittest.TestCase):
 
 
 class TestInsterLateralLimitsException(unittest.TestCase):
-  """The Hyundai Inster's owner-approved exception (MAX_LAT_ACCEL_EXCEPTIONS): limited to 3.3 m/s^2 and to this car, and the jerk rules
-  hold at every cap the car side can use: 384 (switch off) and each value of the speed-dependent table, 430-450 raw, with the same ramps.
-  The jerk scales with ramp / cap x MAX_LAT_ACCEL_MEASURED, so it is highest at the lowest cap."""
+  """The Hyundai Inster's owner-approved exception (MAX_LAT_ACCEL_EXCEPTIONS): this car only, the value in the torque data equals the
+  constant in values.py, and the jerk rules hold with its ramps (3 up / 5 down) both at the cap 409 (MAX_LAT_ACCEL_MEASURED reached at
+  409, the reading TestLateralLimits uses) and, more conservatively, as if it were already reached at the full scale 384."""
 
   def test_exception_scope(self):
     assert set(MAX_LAT_ACCEL_EXCEPTIONS) == {'HYUNDAI_INSTER'}
-    assert MAX_LAT_ACCEL_EXCEPTIONS['HYUNDAI_INSTER'] == 3.3
-    assert get_torque_params()['HYUNDAI_INSTER']['MAX_LAT_ACCEL_MEASURED'] == INSTER_HIGH_TORQUE_MAX_LATERAL_ACCEL
+    # the owner-approved bound: raising the Inster's value above 3.3 m/s^2 needs a deliberate change here
+    assert INSTER_MAX_LAT_ACCEL_MEASURED <= 3.3
+    assert get_torque_params()['HYUNDAI_INSTER']['MAX_LAT_ACCEL_MEASURED'] == INSTER_MAX_LAT_ACCEL_MEASURED
 
-  def test_jerk_limits_speed_dependent_caps(self):
+  def test_jerk_limits_at_cap_and_full_scale(self):
     CarInterface = interfaces['HYUNDAI_INSTER']
     CP = CarInterface.get_non_essential_params('HYUNDAI_INSTER')
-    CarControllerParams = importlib.import_module('opendbc.car.hyundai.values').CarControllerParams
-    control_params = CarControllerParams(CP)
+    control_params = importlib.import_module('opendbc.car.hyundai.values').CarControllerParams(CP)
     torque_params = get_torque_params()['HYUNDAI_INSTER']
-    low, high = min(INSTER_STEER_MAX_LOOKUP[1]), max(INSTER_STEER_MAX_LOOKUP[1])
+    assert (control_params.STEER_MAX, control_params.STEER_FULL_SCALE) == (INSTER_STEER_MAX, INSTER_STEER_FULL_SCALE) == (409, 384)
     assert (control_params.STEER_DELTA_UP, control_params.STEER_DELTA_DOWN) == (3, 5)
-    for cap in [control_params.STEER_MAX, *range(low, high + 1)]:
+    for cap in (INSTER_STEER_MAX, INSTER_STEER_FULL_SCALE):
       params = copy.copy(control_params)
       params.STEER_MAX = cap
       up_jerk, down_jerk = TestLateralLimits.calculate_0_5s_jerk(params, torque_params)
