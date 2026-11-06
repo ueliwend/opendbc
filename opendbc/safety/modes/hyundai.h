@@ -8,8 +8,10 @@
 // 409: the EPS limit is a level; lowest faulting command 417, highest fault-free 409 (held up to 2.45 s; routes 00000072 and
 // 0000007f, 23 Oct 2026), estimate 410-414. Owner-approved experimental exception for this car only.
 #define HYUNDAI_INSTER_STEER_MAX 409
+// Ramp 3 up / 6 down per frame (owner's choice, 5 Nov 2026; down was 5). Up = the standard Hyundai 3. Down only sets the minimum
+// forced release under driver override: 6 per frame for the Inster, 7 standard (5 before).
 #define HYUNDAI_INSTER_STEER_DELTA_UP 3
-#define HYUNDAI_INSTER_STEER_DELTA_DOWN 5
+#define HYUNDAI_INSTER_STEER_DELTA_DOWN 6
 
 #define HYUNDAI_LIMITS(steer, rate_up, rate_down) { \
   .max_torque = (steer), \

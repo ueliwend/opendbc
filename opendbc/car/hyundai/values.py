@@ -25,8 +25,12 @@ Ecu = CarParams.Ecu
 # LAT_ACCEL_FACTOR by the same ratio; FRICTION shrinks roughly by the inverse ratio.
 INSTER_STEER_MAX = 409
 INSTER_STEER_FULL_SCALE = 384
+# Ramp 3 up / 6 down raw per frame (owner's choice, 5 Nov 2026; down was 5): 0 to 384 in 1.28 s, 384 to 0 in 0.64 s. The rise is the
+# standard Hyundai CAN 3; the release 6 is below the standard 7 (panda HYUNDAI_LIMITS(384, 3, 7)), where it only sets the minimum
+# forced release under driver override (6 per frame instead of 7). The jerk of the faster release needs a narrow exception in
+# tests/test_lateral_limits.py (full-scale variant only). Not validated on the car.
 INSTER_STEER_DELTA_UP = 3
-INSTER_STEER_DELTA_DOWN = 5
+INSTER_STEER_DELTA_DOWN = 6
 # Highest lateral acceleration (m/s^2) the Inster reaches at INSTER_STEER_MAX (owner's choice, 20-23 Oct 2026; route 0000007f at 409:
 # 3.1-3.45 held at 40-60 km/h, LOG; 3.13-3.26 estimated above 60 km/h). Must equal MAX_LAT_ACCEL_MEASURED of HYUNDAI_INSTER in
 # torque_data/override.toml (tested); above ISO 11270's 3.0 by an owner-approved exception for this car, bounded at 3.3
