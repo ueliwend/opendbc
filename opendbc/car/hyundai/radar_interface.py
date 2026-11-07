@@ -2,6 +2,7 @@ import math
 from dataclasses import dataclass
 
 from opendbc.can import CANParser
+from opendbc.can.dbc import SignalType
 from opendbc.car import structs
 from opendbc.car.interfaces import RadarInterfaceBase
 
@@ -20,6 +21,8 @@ class HyundaiRadarTrackSpec:
   start_addr: int
   msg_count: int
   track_prefixes: tuple[str, ...]
+  # per-track signals read by decode_radar_track, is_radar_track_valid and get_track_ts_nanos (without prefix)
+  track_signals: tuple[str, ...]
 
   @property
   def end_addr(self) -> int:
@@ -28,6 +31,10 @@ class HyundaiRadarTrackSpec:
   @property
   def address_range(self) -> range:
     return range(self.start_addr, self.end_addr + 1)
+
+  @property
+  def signal_names(self) -> frozenset[str]:
+    return frozenset(f"{prefix}{sig}" for prefix in self.track_prefixes for sig in self.track_signals)
 
   @property
   def dbc_name(self) -> str:
@@ -50,11 +57,11 @@ class HyundaiRadarParserConfig:
   parser: CANParser
 
 
-RADAR_500_51F = HyundaiRadarTrackSpec("RADAR_500_51F", 0x500, 32, ("",))
-RADAR_210_21F = HyundaiRadarTrackSpec("RADAR_210_21F", 0x210, 16, ("1_", "2_"))
-RADAR_235_248 = HyundaiRadarTrackSpec("RADAR_235_248", 0x235, 20, ("",))
-RADAR_3A5_3C4 = HyundaiRadarTrackSpec("RADAR_3A5_3C4", 0x3A5, 32, ("",))
-RADAR_602_617 = HyundaiRadarTrackSpec("RADAR_602_617", 0x602, 16, ("1_", "2_"))
+RADAR_500_51F = HyundaiRadarTrackSpec("RADAR_500_51F", 0x500, 32, ("",), ("STATE", "AZIMUTH", "LONG_DIST", "REL_SPEED"))
+RADAR_210_21F = HyundaiRadarTrackSpec("RADAR_210_21F", 0x210, 16, ("1_", "2_"), ("STATE", "LONG_DIST", "LAT_DIST", "REL_SPEED"))
+RADAR_235_248 = HyundaiRadarTrackSpec("RADAR_235_248", 0x235, 20, ("",), ("STATE", "LONG_DIST", "LAT_DIST", "REL_SPEED"))
+RADAR_3A5_3C4 = HyundaiRadarTrackSpec("RADAR_3A5_3C4", 0x3A5, 32, ("",), ("STATE", "LONG_DIST", "LAT_DIST", "REL_SPEED"))
+RADAR_602_617 = HyundaiRadarTrackSpec("RADAR_602_617", 0x602, 16, ("1_", "2_"), ("DISTANCE", "LATERAL", "SPEED"))
 
 HYUNDAI_RADAR_TRACK_SPECS = (RADAR_500_51F, RADAR_210_21F, RADAR_235_248, RADAR_3A5_3C4, RADAR_602_617)
 DEFAULT_RADAR_TRIGGER_MSG = max(rt.end_addr for rt in HYUNDAI_RADAR_TRACK_SPECS)
@@ -79,9 +86,32 @@ def get_detected_radar_tracks(CP) -> tuple[HyundaiRadarTrackConfig, ...]:
   return DETECTED_RADAR_TRACKS.get(CP.carFingerprint, ())
 
 
+def decode_only_signals(parser: CANParser, signal_names: frozenset[str]) -> None:
+  """Restrict every message of a radar track parser to the given signals.
+
+  The track messages carry ~28 signals, of which the radar interface reads 3-4 per track; decoding the rest costs
+  most of the radar parsing time. Counter and checksum signals are kept, since they decide whether a frame is
+  accepted, so validity and timestamps are unchanged. Dropped signals are also removed from vl and ts_nanos: reading
+  one raises KeyError instead of returning a value that is never updated.
+  """
+  for state in parser.message_states.values():
+    missing = signal_names - {sig.name for sig in state.signals}
+    if missing:
+      raise RuntimeError(f"{state.name} in DBC {parser.dbc_name} lacks radar track signals {sorted(missing)}")
+
+    state.signals = [sig for sig in state.signals
+                     if sig.name in signal_names or sig.type != SignalType.DEFAULT or sig.calc_checksum is not None]
+    kept = {sig.name for sig in state.signals}
+    for values in (parser.vl[state.address], parser.ts_nanos[state.address]):
+      for name in [name for name in values if name not in kept]:
+        del values[name]
+
+
 def get_radar_can_parser(radar_track: HyundaiRadarTrackConfig) -> CANParser:
   messages = [(f"RADAR_TRACK_{addr:x}", 50) for addr in radar_track.spec.address_range]
-  return CANParser(radar_track.spec.dbc_name, messages, radar_track.bus)
+  parser = CANParser(radar_track.spec.dbc_name, messages, radar_track.bus)
+  decode_only_signals(parser, radar_track.spec.signal_names)
+  return parser
 
 
 def get_all_radar_track_candidates() -> tuple[HyundaiRadarTrackConfig, ...]:
@@ -155,7 +185,10 @@ class RadarInterface(RadarInterfaceBase, RadarInterfaceExt):
     RadarInterfaceExt.__init__(self, CP, CP_SP)
     self.pts: dict[int | HyundaiRadarTrackKey, structs.RadarData.RadarPoint] = {}
     detected_tracks = get_detected_radar_tracks(CP)
-    candidate_tracks = get_all_radar_track_candidates() if CP_SP.flags & HyundaiFlagsSP.RADAR_FULL_RADAR else ()
+    # Track ranges found at fingerprinting are used as they are. Only when none was found (radar silent or not yet
+    # sending at startup) are all known layouts on all buses watched, so that a late radar is still picked up.
+    scan_candidates = bool(CP_SP.flags & HyundaiFlagsSP.RADAR_FULL_RADAR) and not detected_tracks
+    candidate_tracks = get_all_radar_track_candidates() if scan_candidates else ()
     self.radar_tracks = tuple(dict.fromkeys((*detected_tracks, *candidate_tracks)))
     self.radar_parsers = tuple(HyundaiRadarParserConfig(rt.spec, rt.bus, get_radar_can_parser(rt)) for rt in self.radar_tracks)
     self.seen_radar_addrs = {(rt.spec.name, rt.bus): set(rt.spec.address_range) for rt in detected_tracks}

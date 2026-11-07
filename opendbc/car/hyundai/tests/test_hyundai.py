@@ -1,3 +1,4 @@
+import random
 import unittest
 
 from opendbc.can import CANPacker, CANParser
@@ -10,7 +11,9 @@ from opendbc.car.hyundai.interface import CarInterface
 from opendbc.car.hyundai.carstate import AX1_CRUISE_BUTTONS, AX1_PAUSE_RESUME_BUTTON
 from opendbc.car.hyundai.hyundaicanfd import CanBus
 from opendbc.car.hyundai.radar_interface import HYUNDAI_RADAR_TRACK_SPECS, RADAR_210_21F, RADAR_235_248, RADAR_3A5_3C4, \
-                                                RADAR_500_51F, RADAR_602_617, RadarInterface, get_detected_radar_tracks
+                                                RADAR_500_51F, RADAR_602_617, RADAR_TRACK_BUSES, HyundaiRadarTrackConfig, \
+                                                RadarInterface, decode_only_signals, get_detected_radar_tracks, \
+                                                get_radar_can_parser
 from opendbc.car.hyundai.values import CAR, DATE_FW_ECUS, \
                                          FW_QUERY_CONFIG, CANFD_FUZZY_WHITELIST, \
                                          PLATFORM_CODE_ECUS, HYUNDAI_VERSION_REQUEST_LONG, \
@@ -257,6 +260,59 @@ class TestHyundaiFingerprint(unittest.TestCase):
         points = RI._update([]).points
 
         assert len(points) == 2
+
+  def test_radar_interface_fingerprinted_range_only(self):
+    # a range found at fingerprinting is used as is: no candidate parsers for other layouts or buses
+    fingerprint = gen_empty_fingerprint()
+    add_radar_range(fingerprint, RADAR_3A5_3C4, 1)
+    CP = CarInterface.get_params(CAR.HYUNDAI_SONATA, fingerprint, [], False, False, False)
+    RI = RadarInterface(CP, CarParamsSP(flags=HyundaiFlagsSP.RADAR_FULL_RADAR.value))
+
+    assert [(rp.spec, rp.bus) for rp in RI.radar_parsers] == [(RADAR_3A5_3C4, 1)]
+    assert RI.rcp is RI.radar_parsers[0].parser
+
+  def test_radar_interface_scans_candidates_without_fingerprinted_range(self):
+    fingerprint = gen_empty_fingerprint()
+    CP = CarInterface.get_params(CAR.HYUNDAI_SONATA, fingerprint, [], False, False, False)
+    RI = RadarInterface(CP, CarParamsSP(flags=HyundaiFlagsSP.RADAR_FULL_RADAR.value))
+
+    expected = [(spec, bus) for spec in HYUNDAI_RADAR_TRACK_SPECS for bus in RADAR_TRACK_BUSES]
+    assert [(rp.spec, rp.bus) for rp in RI.radar_parsers] == expected
+
+  def test_radar_parsers_decode_only_read_signals(self):
+    # the track parsers decode only the signals the radar interface reads, with the same values, timestamps and
+    # validity as a parser of the whole DBC message; a dropped signal cannot be read by mistake
+    rng = random.Random(0)
+    for radar_spec in HYUNDAI_RADAR_TRACK_SPECS:
+      with self.subTest(radar_spec=radar_spec.name):
+        bus = 1
+        slim = get_radar_can_parser(HyundaiRadarTrackConfig(radar_spec, bus))
+        full = CANParser(radar_spec.dbc_name, [(f"RADAR_TRACK_{addr:x}", 50) for addr in radar_spec.address_range], bus)
+
+        for state in slim.message_states.values():
+          assert {sig.name for sig in state.signals} == radar_spec.signal_names
+          assert set(slim.vl[state.name]) == radar_spec.signal_names
+          assert set(slim.ts_nanos[state.name]) == radar_spec.signal_names
+          dropped = next(name for name in full.vl[state.name] if name not in radar_spec.signal_names)
+          with self.assertRaises(KeyError):
+            _ = slim.vl[state.name][dropped]
+
+        for cycle in range(1, 51):
+          frames = [(addr, bytes(rng.getrandbits(8) for _ in range(full.message_states[addr].size)), bus)
+                    for addr in radar_spec.address_range if rng.random() < 0.7]
+          frames.append((radar_spec.start_addr, b"\x00" * full.message_states[radar_spec.start_addr].size, bus + 1))
+          strings = [(cycle * 10_000_000, frames)]
+          assert slim.update(strings) == full.update(strings)
+          assert slim.can_valid == full.can_valid
+          for addr in radar_spec.address_range:
+            for name in radar_spec.signal_names:
+              assert slim.vl[addr][name] == full.vl[addr][name]
+              assert slim.ts_nanos[addr][name] == full.ts_nanos[addr][name]
+
+  def test_radar_parser_missing_signal_raises(self):
+    parser = CANParser(RADAR_3A5_3C4.dbc_name, [(f"RADAR_TRACK_{RADAR_3A5_3C4.start_addr:x}", 50)], 1)
+    with self.assertRaises(RuntimeError):
+      decode_only_signals(parser, frozenset({"STATE", "NOT_A_SIGNAL"}))
 
   def test_alternate_limits(self):
     # Alternate lateral control limits, for high torque cars, verify Panda safety mode flag is set
