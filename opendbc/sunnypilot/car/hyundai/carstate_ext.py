@@ -23,15 +23,15 @@ class CarStateExt:
   def update_speed_limit(self, cp, cp_cam) -> float:
     speed_limit = 0
 
-    if self.CP.flags & HyundaiFlags.CANFD:
-      if self.CP_SP.flags & HyundaiFlagsSP.SPEED_LIMIT_AVAILABLE:
-        bus = cp if self.CP.flags & HyundaiFlags.CANFD_LKA_STEER_MSG else cp_cam
+    if self.CP.flags & HyundaiFlags.CANFD.value:
+      if self.CP_SP.flags & HyundaiFlagsSP.SPEED_LIMIT_AVAILABLE.value:
+        bus = cp if self.CP.flags & HyundaiFlags.CANFD_LKA_STEER_MSG.value else cp_cam
         speed_limit = bus.vl["FR_CMR_02_100ms"]["ISLW_SpdCluMainDis"]
     else:
       nav, cam = 0, 0
-      if self.CP_SP.flags & HyundaiFlagsSP.SPEED_LIMIT_AVAILABLE:
+      if self.CP_SP.flags & HyundaiFlagsSP.SPEED_LIMIT_AVAILABLE.value:
         nav = cp.vl["Navi_HU"]["SpeedLim_Nav_Clu"]
-      if self.CP_SP.flags & HyundaiFlagsSP.HAS_LKAS12:
+      if self.CP_SP.flags & HyundaiFlagsSP.HAS_LKAS12.value:
         cam = cp_cam.vl["LKAS12"]["CF_Lkas_TsrSpeed_Display_Clu"]
 
       speed_limit = cam if cam not in (0, 255) else nav
@@ -47,17 +47,17 @@ class CarStateExt:
 
     self.aBasis = cp.vl["TCS13"]["aBasis"]
 
-    if self.CP_SP.flags & HyundaiFlagsSP.NON_SCC:
-      cruise_msg = "LABEL11" if self.CP.flags & HyundaiFlags.EV else \
-                   "E_CRUISE_CONTROL" if self.CP.flags & HyundaiFlags.HYBRID else \
+    if self.CP_SP.flags & HyundaiFlagsSP.NON_SCC.value:
+      cruise_msg = "LABEL11" if self.CP.flags & HyundaiFlags.EV.value else \
+                   "E_CRUISE_CONTROL" if self.CP.flags & HyundaiFlags.HYBRID.value else \
                    "EMS16"
-      cruise_available_sig = "CC_React" if self.CP.flags & HyundaiFlags.EV else "CRUISE_LAMP_M"
-      cruise_enabled_sig = "CC_ACT" if self.CP.flags & HyundaiFlags.EV else "CRUISE_LAMP_S"
-      cruise_speed_msg = "E_EMS11" if self.CP.flags & HyundaiFlags.EV else \
-                         "ELECT_GEAR" if self.CP.flags & HyundaiFlags.HYBRID else \
+      cruise_available_sig = "CC_React" if self.CP.flags & HyundaiFlags.EV.value else "CRUISE_LAMP_M"
+      cruise_enabled_sig = "CC_ACT" if self.CP.flags & HyundaiFlags.EV.value else "CRUISE_LAMP_S"
+      cruise_speed_msg = "E_EMS11" if self.CP.flags & HyundaiFlags.EV.value else \
+                         "ELECT_GEAR" if self.CP.flags & HyundaiFlags.HYBRID.value else \
                          "LVR12"
-      cruise_speed_sig = "Cruise_Limit_Target" if self.CP.flags & HyundaiFlags.EV else \
-                         "SLC_SET_SPEED" if self.CP.flags & HyundaiFlags.HYBRID else \
+      cruise_speed_sig = "Cruise_Limit_Target" if self.CP.flags & HyundaiFlags.EV.value else \
+                         "SLC_SET_SPEED" if self.CP.flags & HyundaiFlags.HYBRID.value else \
                          "CF_Lvr_CruiseSet"
       ret.cruiseState.available = cp.vl[cruise_msg][cruise_available_sig] != 0
       ret.cruiseState.enabled = cp.vl[cruise_msg][cruise_enabled_sig] != 0
@@ -65,8 +65,8 @@ class CarStateExt:
       ret.cruiseState.standstill = False
       ret.cruiseState.nonAdaptive = False
 
-      if not self.CP_SP.flags & HyundaiFlagsSP.NON_SCC_NO_FCA:
-        cp_cruise = cp if self.CP_SP.flags & HyundaiFlagsSP.NON_SCC_RADAR_FCA else cp_cam
+      if not self.CP_SP.flags & HyundaiFlagsSP.NON_SCC_NO_FCA.value:
+        cp_cruise = cp if self.CP_SP.flags & HyundaiFlagsSP.NON_SCC_RADAR_FCA.value else cp_cam
 
         aeb_src = "FCA11"
         aeb_warning = cp_cruise.vl[aeb_src]["CF_VSM_Warn"] != 0

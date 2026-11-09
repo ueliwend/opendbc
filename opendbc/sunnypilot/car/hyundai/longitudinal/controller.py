@@ -55,7 +55,7 @@ class LongitudinalController:
 
   @property
   def enabled(self) -> bool:
-    return bool(self.CP_SP.flags & (HyundaiFlagsSP.LONG_TUNING_DYNAMIC | HyundaiFlagsSP.LONG_TUNING_PREDICTIVE))
+    return bool(self.CP_SP.flags & (HyundaiFlagsSP.LONG_TUNING_DYNAMIC.value | HyundaiFlagsSP.LONG_TUNING_PREDICTIVE.value))
 
   def get_stopping_state(self, actuators: structs.CarControl.Actuators) -> None:
     stopping = actuators.longControlState == LongCtrlState.stopping
@@ -99,7 +99,7 @@ class LongitudinalController:
     else:
       upper_limit = 0.5  # Default for non-PID states
 
-    if self.CP_SP.flags & HyundaiFlagsSP.LONG_TUNING_PREDICTIVE:
+    if self.CP_SP.flags & HyundaiFlagsSP.LONG_TUNING_PREDICTIVE.value:
       lower_limit = float(np.interp(velocity, [0.0, 5.0, 20.0], [5.0, 3.5, 3.0]))
     else:
       lower_limit = float(np.interp(velocity, [0.0, 5.0, 20.0], [3.5, 3.5, 3.0]))
@@ -156,7 +156,7 @@ class LongitudinalController:
     # Apply jerk limits based on tuning approach
     # Predictive tuning uses calculated desired jerk directly
     # Minimal Dynamic tuning applies only a speed based approach
-    if self.CP_SP.flags & HyundaiFlagsSP.LONG_TUNING_PREDICTIVE:
+    if self.CP_SP.flags & HyundaiFlagsSP.LONG_TUNING_PREDICTIVE.value:
       j_ego_upper, j_ego_lower = self._calculate_lookahead_jerk(accel_error, velocity)
       desired_jerk_upper = min(max(j_ego_upper, MIN_JERK), upper_speed_factor)
       desired_jerk_lower = min(max(-j_ego_lower, MIN_JERK), lower_speed_factor)
@@ -217,7 +217,7 @@ class LongitudinalController:
     decel_vals = [-3.5, -2.5, -1.5, -1.0, -0.5, -0.05]
     comfort_band_vals = [0.0, 0.02, 0.04, 0.06, 0.08, 0.10]
 
-    if self.CP_SP.flags & HyundaiFlagsSP.LONG_TUNING_PREDICTIVE:
+    if self.CP_SP.flags & HyundaiFlagsSP.LONG_TUNING_PREDICTIVE.value:
       self.comfort_band_upper = float(np.interp(accel, accel_vals, comfort_band_vals))
       self.comfort_band_lower = float(np.interp(accel, decel_vals, comfort_band_vals[::-1]))
     else:

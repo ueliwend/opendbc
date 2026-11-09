@@ -87,11 +87,11 @@ def create_lkas11(packer, frame, CP, apply_torque, steer_req,
 
   dat = packer.make_can_msg("LKAS11", 0, values)[1]
 
-  if CP.flags & HyundaiFlags.CHECKSUM_CRC8:
+  if CP.flags & HyundaiFlags.CHECKSUM_CRC8.value:
     # CRC Checksum as seen on 2019 Hyundai Santa Fe
     dat = dat[:6] + dat[7:8]
     checksum = hyundai_checksum(dat)
-  elif CP.flags & HyundaiFlags.CHECKSUM_6B:
+  elif CP.flags & HyundaiFlags.CHECKSUM_6B.value:
     # Checksum of first 6 Bytes, as seen on 2018 Kia Sorento
     checksum = sum(dat[:6]) % 256
   else:

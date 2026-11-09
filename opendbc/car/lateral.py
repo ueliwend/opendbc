@@ -77,15 +77,16 @@ def apply_driver_steer_torque_limits(apply_torque: int, apply_torque_last: int, 
   driver_min_torque = -steer_max + (-LIMITS.STEER_DRIVER_ALLOWANCE + driver_torque * LIMITS.STEER_DRIVER_FACTOR) * LIMITS.STEER_DRIVER_MULTIPLIER
   max_steer_allowed = max(min(steer_max, driver_max_torque), 0)
   min_steer_allowed = min(max(-steer_max, driver_min_torque), 0)
-  apply_torque = np.clip(apply_torque, min_steer_allowed, max_steer_allowed)
+  # scalar clips (same values as np.clip, without its per-call overhead): min(max(value, lower), upper)
+  apply_torque = min(max(apply_torque, min_steer_allowed), max_steer_allowed)
 
   # slow rate if steer torque increases in magnitude
   if apply_torque_last > 0:
-    apply_torque = np.clip(apply_torque, max(apply_torque_last - LIMITS.STEER_DELTA_DOWN, -LIMITS.STEER_DELTA_UP),
-                           apply_torque_last + LIMITS.STEER_DELTA_UP)
+    apply_torque = min(max(apply_torque, max(apply_torque_last - LIMITS.STEER_DELTA_DOWN, -LIMITS.STEER_DELTA_UP)),
+                       apply_torque_last + LIMITS.STEER_DELTA_UP)
   else:
-    apply_torque = np.clip(apply_torque, apply_torque_last - LIMITS.STEER_DELTA_UP,
-                           min(apply_torque_last + LIMITS.STEER_DELTA_DOWN, LIMITS.STEER_DELTA_UP))
+    apply_torque = min(max(apply_torque, apply_torque_last - LIMITS.STEER_DELTA_UP),
+                       min(apply_torque_last + LIMITS.STEER_DELTA_DOWN, LIMITS.STEER_DELTA_UP))
 
   return int(round(float(apply_torque)))
 

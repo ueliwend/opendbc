@@ -181,14 +181,14 @@ class RadarInterface(RadarInterfaceBase, RadarInterfaceExt):
     self.radar_off_can = CP.radarUnavailable and not (CP_SP.flags & HyundaiFlagsSP.RADAR_FULL_RADAR)
     self.rcp: CANParser | None = self.radar_parsers[0].parser if self.radar_parsers else None
 
-    if self.CP_SP.flags & HyundaiFlagsSP.RADAR_LEAD_ONLY:
+    if self.CP_SP.flags & HyundaiFlagsSP.RADAR_LEAD_ONLY.value:
       self.initialize_radar_ext(self.trigger_msg)
 
   def update(self, can_strings):
     if self.radar_off_can or (self.rcp is None):
       return super().update(None)
 
-    if self.CP_SP.flags & HyundaiFlagsSP.RADAR_LEAD_ONLY and self.use_radar_interface_ext:
+    if self.CP_SP.flags & HyundaiFlagsSP.RADAR_LEAD_ONLY.value and self.use_radar_interface_ext:
       vls = self.rcp.update(can_strings)
       self.updated_messages.update((0, addr) for addr in vls)
 
@@ -285,12 +285,12 @@ class RadarInterface(RadarInterfaceBase, RadarInterfaceExt):
     if self.rcp is None:
       return ret
 
-    if self.CP_SP.flags & HyundaiFlagsSP.RADAR_LEAD_ONLY:
+    if self.CP_SP.flags & HyundaiFlagsSP.RADAR_LEAD_ONLY.value:
       if self.use_radar_interface_ext:
         return self.update_ext(ret)
 
     active_radar_parsers: list[HyundaiRadarParserConfig] = []
-    if self.CP_SP.flags & HyundaiFlagsSP.RADAR_FULL_RADAR:
+    if self.CP_SP.flags & HyundaiFlagsSP.RADAR_FULL_RADAR.value:
       radar_parsers_by_spec: dict[str, list[HyundaiRadarParserConfig]] = {}
       for radar_parser in self.radar_parsers:
         if not self._radar_range_complete(radar_parser):

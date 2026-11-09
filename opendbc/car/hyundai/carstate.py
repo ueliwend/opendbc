@@ -120,12 +120,12 @@ class CarState(CarStateBase, EsccCarStateBase, MadsCarState, CarStateExt):
     cp = can_parsers[Bus.pt]
     cp_cam = can_parsers[Bus.cam]
 
-    if self.CP.flags & HyundaiFlags.CANFD:
+    if self.CP.flags & HyundaiFlags.CANFD.value:
       return self.update_canfd(can_parsers)
 
     ret = structs.CarState()
     ret_sp = structs.CarStateSP()
-    cp_cruise = cp_cam if self.CP.flags & HyundaiFlags.CAMERA_SCC else cp
+    cp_cruise = cp_cam if self.CP.flags & HyundaiFlags.CAMERA_SCC.value else cp
     self.is_metric = cp.vl["CLU11"]["CF_Clu_SPEED_UNIT"] == 0
     speed_conv = CV.KPH_TO_MS if self.is_metric else CV.MPH_TO_MS
 
@@ -171,7 +171,7 @@ class CarState(CarStateBase, EsccCarStateBase, MadsCarState, CarStateExt):
       ret.cruiseState.enabled = cp.vl["TCS13"]["ACC_REQ"] == 1
       ret.cruiseState.standstill = False
       ret.cruiseState.nonAdaptive = False
-    elif not self.CP_SP.flags & HyundaiFlagsSP.NON_SCC:
+    elif not self.CP_SP.flags & HyundaiFlagsSP.NON_SCC.value:
       ret.cruiseState.available = cp_cruise.vl["SCC11"]["MainMode_ACC"] == 1
       ret.cruiseState.enabled = cp_cruise.vl["SCC12"]["ACCMode"] != 0
       ret.cruiseState.standstill = cp_cruise.vl["SCC11"]["SCCInfoDisplay"] == 4.
@@ -185,10 +185,10 @@ class CarState(CarStateBase, EsccCarStateBase, MadsCarState, CarStateExt):
     ret.espActive = cp.vl["TCS11"]["ABS_ACT"] == 1
     ret.accFaulted = cp.vl["TCS13"]["ACCEnable"] != 0  # 0 ACC CONTROL ENABLED, 1-3 ACC CONTROL DISABLED
 
-    if self.CP.flags & (HyundaiFlags.HYBRID | HyundaiFlags.EV | HyundaiFlags.FCEV):
-      if self.CP.flags & HyundaiFlags.FCEV:
+    if self.CP.flags & (HyundaiFlags.HYBRID.value | HyundaiFlags.EV.value | HyundaiFlags.FCEV.value):
+      if self.CP.flags & HyundaiFlags.FCEV.value:
         ret.gasPressed = cp.vl["FCEV_ACCELERATOR"]["ACCELERATOR_PEDAL"] > 0
-      elif self.CP.flags & HyundaiFlags.HYBRID:
+      elif self.CP.flags & HyundaiFlags.HYBRID.value:
         ret.gasPressed = cp.vl["E_EMS11"]["CR_Vcu_AccPedDep_Pos"] > 0
       else:
         ret.gasPressed = cp.vl["E_EMS11"]["Accel_Pedal_Pos"] > 0
@@ -197,20 +197,20 @@ class CarState(CarStateBase, EsccCarStateBase, MadsCarState, CarStateExt):
 
     # Gear Selection via Cluster - For those Kia/Hyundai which are not fully discovered, we can use the Cluster Indicator for Gear Selection,
     # as this seems to be standard over all cars, but is not the preferred method.
-    if self.CP.flags & (HyundaiFlags.HYBRID | HyundaiFlags.EV):
+    if self.CP.flags & (HyundaiFlags.HYBRID.value | HyundaiFlags.EV.value):
       gear = cp.vl["ELECT_GEAR"]["Elect_Gear_Shifter"]
-    elif self.CP.flags & HyundaiFlags.FCEV:
+    elif self.CP.flags & HyundaiFlags.FCEV.value:
       gear = cp.vl["EMS20"]["HYDROGEN_GEAR_SHIFTER"]
-    elif self.CP.flags & HyundaiFlags.CLUSTER_GEARS:
+    elif self.CP.flags & HyundaiFlags.CLUSTER_GEARS.value:
       gear = cp.vl["CLU15"]["CF_Clu_Gear"]
-    elif self.CP.flags & HyundaiFlags.TCU_GEARS:
+    elif self.CP.flags & HyundaiFlags.TCU_GEARS.value:
       gear = cp.vl["TCU12"]["CUR_GR"]
     else:
       gear = cp.vl["LVR12"]["CF_Lvr_Gear"]
 
     ret.gearShifter = self.parse_gear_shifter(self.shifter_values.get(gear))
 
-    if (not self.CP.openpilotLongitudinalControl or self.CP.flags & HyundaiFlags.CAMERA_SCC) and not self.CP_SP.flags & HyundaiFlagsSP.NON_SCC:
+    if (not self.CP.openpilotLongitudinalControl or self.CP.flags & HyundaiFlags.CAMERA_SCC.value) and not self.CP_SP.flags & HyundaiFlagsSP.NON_SCC.value:
       aeb_src = "FCA11" if self.CP.flags & HyundaiFlags.USE_FCA.value else "SCC12"
       aeb_sig = "FCA_CmdAct" if self.CP.flags & HyundaiFlags.USE_FCA.value else "AEB_CmdAct"
       aeb_warning = cp_cruise.vl[aeb_src]["CF_VSM_Warn"] != 0
@@ -219,20 +219,20 @@ class CarState(CarStateBase, EsccCarStateBase, MadsCarState, CarStateExt):
       ret.stockFcw = (aeb_warning or scc_warning) and not aeb_braking
       ret.stockAeb = aeb_warning and aeb_braking
 
-    if self.CP.flags & HyundaiFlags.HAS_BSM:
+    if self.CP.flags & HyundaiFlags.HAS_BSM.value:
       ret.leftBlindspot = cp.vl["LCA11"]["CF_Lca_IndLeft"] != 0
       ret.rightBlindspot = cp.vl["LCA11"]["CF_Lca_IndRight"] != 0
 
     # save the entire LKAS11 and CLU11
     self.lkas11 = copy.copy(cp_cam.vl["LKAS11"])
     self.clu11 = copy.copy(cp.vl["CLU11"])
-    if self.CP.flags & HyundaiFlags.CAN_REFRESH_MSGS and self.CP.flags & HyundaiFlags.SEND_LFA:
+    if self.CP.flags & HyundaiFlags.CAN_REFRESH_MSGS.value and self.CP.flags & HyundaiFlags.SEND_LFA.value:
       self.lfahda_mfc = copy.copy(cp_cam.vl["LFAHDA_MFC"])
     self.steer_state = cp.vl["MDPS12"]["CF_Mdps_ToiActive"]  # 0 NOT ACTIVE, 1 ACTIVE
     prev_cruise_buttons = self.cruise_buttons[-1]
     prev_main_buttons = self.main_buttons[-1]
     prev_lda_button = self.lda_button
-    if self.CP.flags & HyundaiFlags.ALT_AX1EV_BUTTONS:
+    if self.CP.flags & HyundaiFlags.ALT_AX1EV_BUTTONS.value:
       ax1_button = AX1_PAUSE_RESUME_BUTTON if cp.vl["AX1_CRUISE_BUTTONS"]["CRUISE_RESUME"] else \
                    AX1_CRUISE_BUTTONS[cp.vl["AX1_CRUISE_BUTTONS"]["CRUISE_BUTTONS"]]
       self.cruise_buttons.append(ax1_button)
@@ -240,9 +240,9 @@ class CarState(CarStateBase, EsccCarStateBase, MadsCarState, CarStateExt):
     else:
       self.cruise_buttons.extend(cp.vl_all["CLU11"]["CF_Clu_CruiseSwState"])
       self.main_buttons.extend(cp.vl_all["CLU11"]["CF_Clu_CruiseSwMain"])
-    if self.CP.flags & HyundaiFlags.ALT_AX1EV_BUTTONS:
+    if self.CP.flags & HyundaiFlags.ALT_AX1EV_BUTTONS.value:
       self.lda_button = cp.vl["AX1_LDA_BUTTON"]["LDA_BTN"]
-    elif self.CP.flags & HyundaiFlags.HAS_LDA_BUTTON:
+    elif self.CP.flags & HyundaiFlags.HAS_LDA_BUTTON.value:
       self.lda_button = cp.vl["BCM_PO_11"]["LDA_BTN"]
 
     ret.buttonEvents = [*create_button_events(self.cruise_buttons[-1], prev_cruise_buttons, BUTTONS_DICT),
