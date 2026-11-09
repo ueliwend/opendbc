@@ -27,6 +27,42 @@ BUTTONS_DICT = {Buttons.RES_ACCEL: ButtonType.accelCruise, Buttons.SET_DECEL: Bu
 AX1_CRUISE_BUTTONS = {0: Buttons.NONE, 1: Buttons.RES_ACCEL, 2: Buttons.SET_DECEL, 3: Buttons.GAP_DIST}
 AX1_PAUSE_RESUME_BUTTON = Buttons.CANCEL
 
+# Signals that CarState (with sunnypilot's CarStateExt) reads from each car-state message, per platform. These messages
+# decode only the listed signals instead of all of them (most carry many more), which takes about half off the car-state
+# parsing time. Messages not listed are decoded whole, among them the copies re-sent by the car controller (LKAS11, CLU11,
+# LFAHDA_MFC). A list covers every path of its platform, including those selected by flags from the fingerprint, by
+# openpilot longitudinal control or by sunnypilot settings. A signal missing here is still read correctly: the parser
+# decodes it on demand and logs a warning (CANParser decode_only), and the strict-mode tests fail
+# (car/hyundai/tests/test_carstate_signals.py, car/tests/test_car_interfaces.py).
+CARSTATE_SIGNALS: dict[str, dict[str, tuple[str, ...]]] = {
+  # Alex4386's AX1EV (Casper Electric) port: classic CAN, camera SCC, EV, AX1 buttons
+  CAR.HYUNDAI_INSTER: {
+    # bus 0
+    "CGW1": ("CF_Gway_DrvDrSw", "CF_Gway_AstDrSw", "CF_Gway_DrvSeatBeltSw", "CF_Gway_TurnSigLh", "CF_Gway_TurnSigRh"),
+    "CGW2": ("CF_Gway_RLDrSw", "CF_Gway_RRDrSw"),
+    "WHL_SPD11": ("WHL_SPD_FL", "WHL_SPD_FR", "WHL_SPD_RL", "WHL_SPD_RR"),
+    "CLU15": ("CF_Clu_VehicleSpeed",),
+    "SAS11": ("SAS_Angle", "SAS_Speed"),
+    "MDPS12": ("CR_Mdps_StrColTq", "CR_Mdps_OutTq", "CF_Mdps_ToiUnavail", "CF_Mdps_ToiFlt", "CF_Mdps_ToiActive"),
+    # ACC_REQ: openpilot longitudinal; aBasis: sunnypilot CarStateExt
+    "TCS13": ("ACCEnable", "ACC_REQ", "DriverOverride", "PBRAKE_ACT", "aBasis"),
+    "TCS15": ("AVH_LAMP",),
+    "TCS11": ("TCS_PAS", "ABS_ACT"),
+    "E_EMS11": ("Accel_Pedal_Pos",),
+    "ELECT_GEAR": ("Elect_Gear_Shifter",),
+    "LCA11": ("CF_Lca_IndLeft", "CF_Lca_IndRight"),
+    "AX1_CRUISE_BUTTONS": ("CRUISE_RESUME", "CRUISE_BUTTONS", "CRUISE_MAIN"),
+    "AX1_LDA_BUTTON": ("LDA_BTN",),
+    "Navi_HU": ("SpeedLim_Nav_Clu",),  # sunnypilot CarStateExt
+    # bus 2 (camera SCC)
+    "SCC11": ("MainMode_ACC", "SCCInfoDisplay", "VSetDis"),
+    # AEB_CmdAct, CF_VSM_Warn, CF_VSM_DecCmdAct: AEB source when FCA11 (0x38d) is missing from the fingerprint
+    "SCC12": ("ACCMode", "TakeOverReq", "AEB_CmdAct", "CF_VSM_Warn", "CF_VSM_DecCmdAct"),
+    "FCA11": ("CF_VSM_Warn", "CF_VSM_DecCmdAct", "FCA_CmdAct"),
+    "LKAS12": ("CF_Lkas_TsrSpeed_Display_Clu",),  # sunnypilot CarStateExt
+  },
+}
+
 
 class CarState(CarStateBase, EsccCarStateBase, MadsCarState, CarStateExt):
   def __init__(self, CP, CP_SP):
@@ -350,7 +386,8 @@ class CarState(CarStateBase, EsccCarStateBase, MadsCarState, CarStateExt):
       pt_messages.append(("AX1_LDA_BUTTON", math.nan))
       pt_messages.append(("AX1_CRUISE_BUTTONS", 5))
 
+    decode_only = CARSTATE_SIGNALS.get(CP.carFingerprint)
     return {
-      Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], pt_messages, 0),
-      Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.pt], [], 2),
+      Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], pt_messages, 0, decode_only=decode_only),
+      Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.pt], [], 2, decode_only=decode_only),
     }

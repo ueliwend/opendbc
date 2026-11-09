@@ -2,7 +2,6 @@ import math
 from dataclasses import dataclass
 
 from opendbc.can import CANParser
-from opendbc.can.dbc import SignalType
 from opendbc.car import structs
 from opendbc.car.interfaces import RadarInterfaceBase
 
@@ -86,32 +85,13 @@ def get_detected_radar_tracks(CP) -> tuple[HyundaiRadarTrackConfig, ...]:
   return DETECTED_RADAR_TRACKS.get(CP.carFingerprint, ())
 
 
-def decode_only_signals(parser: CANParser, signal_names: frozenset[str]) -> None:
-  """Restrict every message of a radar track parser to the given signals.
-
-  The track messages carry ~28 signals, of which the radar interface reads 3-4 per track; decoding the rest costs
-  most of the radar parsing time. Counter and checksum signals are kept, since they decide whether a frame is
-  accepted, so validity and timestamps are unchanged. Dropped signals are also removed from vl and ts_nanos: reading
-  one raises KeyError instead of returning a value that is never updated.
-  """
-  for state in parser.message_states.values():
-    missing = signal_names - {sig.name for sig in state.signals}
-    if missing:
-      raise RuntimeError(f"{state.name} in DBC {parser.dbc_name} lacks radar track signals {sorted(missing)}")
-
-    state.signals = [sig for sig in state.signals
-                     if sig.name in signal_names or sig.type != SignalType.DEFAULT or sig.calc_checksum is not None]
-    kept = {sig.name for sig in state.signals}
-    for values in (parser.vl[state.address], parser.ts_nanos[state.address]):
-      for name in [name for name in values if name not in kept]:
-        del values[name]
-
-
 def get_radar_can_parser(radar_track: HyundaiRadarTrackConfig) -> CANParser:
+  # The track messages carry ~28 signals, of which the radar interface reads 3-4 per track; decoding the rest cost most
+  # of the radar parsing time. Counter and checksum signals stay decoded, so frame acceptance, timestamps and validity
+  # are unchanged (see CANParser decode_only).
   messages = [(f"RADAR_TRACK_{addr:x}", 50) for addr in radar_track.spec.address_range]
-  parser = CANParser(radar_track.spec.dbc_name, messages, radar_track.bus)
-  decode_only_signals(parser, radar_track.spec.signal_names)
-  return parser
+  decode_only = {name: radar_track.spec.signal_names for name, _ in messages}
+  return CANParser(radar_track.spec.dbc_name, messages, radar_track.bus, decode_only=decode_only)
 
 
 def get_all_radar_track_candidates() -> tuple[HyundaiRadarTrackConfig, ...]:

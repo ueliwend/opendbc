@@ -2,6 +2,7 @@ import random
 import unittest
 
 from opendbc.can import CANPacker, CANParser
+from opendbc.can.parser import UndecodedSignalError
 from opendbc.car import Bus, DT_CTRL, gen_empty_fingerprint, structs
 from opendbc.car.can_definitions import CanData
 from opendbc.car.structs import CarParams, CarParamsSP
@@ -12,7 +13,7 @@ from opendbc.car.hyundai.carstate import AX1_CRUISE_BUTTONS, AX1_PAUSE_RESUME_BU
 from opendbc.car.hyundai.hyundaicanfd import CanBus
 from opendbc.car.hyundai.radar_interface import HYUNDAI_RADAR_TRACK_SPECS, RADAR_210_21F, RADAR_235_248, RADAR_3A5_3C4, \
                                                 RADAR_500_51F, RADAR_602_617, RADAR_TRACK_BUSES, HyundaiRadarTrackConfig, \
-                                                RadarInterface, decode_only_signals, get_detected_radar_tracks, \
+                                                HyundaiRadarTrackSpec, RadarInterface, get_detected_radar_tracks, \
                                                 get_radar_can_parser
 from opendbc.car.hyundai.values import CAR, DATE_FW_ECUS, \
                                          FW_QUERY_CONFIG, CANFD_FUZZY_WHITELIST, \
@@ -281,7 +282,7 @@ class TestHyundaiFingerprint(unittest.TestCase):
 
   def test_radar_parsers_decode_only_read_signals(self):
     # the track parsers decode only the signals the radar interface reads, with the same values, timestamps and
-    # validity as a parser of the whole DBC message; a dropped signal cannot be read by mistake
+    # validity as a parser of the whole DBC message
     rng = random.Random(0)
     for radar_spec in HYUNDAI_RADAR_TRACK_SPECS:
       with self.subTest(radar_spec=radar_spec.name):
@@ -291,11 +292,8 @@ class TestHyundaiFingerprint(unittest.TestCase):
 
         for state in slim.message_states.values():
           assert {sig.name for sig in state.signals} == radar_spec.signal_names
-          assert set(slim.vl[state.name]) == radar_spec.signal_names
-          assert set(slim.ts_nanos[state.name]) == radar_spec.signal_names
-          dropped = next(name for name in full.vl[state.name] if name not in radar_spec.signal_names)
-          with self.assertRaises(KeyError):
-            _ = slim.vl[state.name][dropped]
+          assert set(dict.keys(slim.vl[state.name])) == radar_spec.signal_names
+          assert set(dict.keys(slim.ts_nanos[state.name])) == radar_spec.signal_names
 
         for cycle in range(1, 51):
           frames = [(addr, bytes(rng.getrandbits(8) for _ in range(full.message_states[addr].size)), bus)
@@ -309,10 +307,22 @@ class TestHyundaiFingerprint(unittest.TestCase):
               assert slim.vl[addr][name] == full.vl[addr][name]
               assert slim.ts_nanos[addr][name] == full.ts_nanos[addr][name]
 
+        # a signal outside the list is decoded on demand (the strict mode of the tests raises instead)
+        state = slim.message_states[radar_spec.start_addr]
+        dropped = next(name for name in full.vl[state.name] if name not in radar_spec.signal_names)
+        try:
+          CANParser.strict_decode = True
+          with self.assertRaises(UndecodedSignalError):
+            _ = slim.vl[state.name][dropped]
+        finally:
+          CANParser.strict_decode = False
+        with self.assertLogs("carlog", level="WARNING"):
+          assert slim.vl[state.name][dropped] == full.vl[state.name][dropped]
+
   def test_radar_parser_missing_signal_raises(self):
-    parser = CANParser(RADAR_3A5_3C4.dbc_name, [(f"RADAR_TRACK_{RADAR_3A5_3C4.start_addr:x}", 50)], 1)
+    spec = HyundaiRadarTrackSpec("RADAR_3A5_3C4", 0x3A5, 32, ("",), ("STATE", "NOT_A_SIGNAL"))
     with self.assertRaises(RuntimeError):
-      decode_only_signals(parser, frozenset({"STATE", "NOT_A_SIGNAL"}))
+      get_radar_can_parser(HyundaiRadarTrackConfig(spec, 1))
 
   def test_alternate_limits(self):
     # Alternate lateral control limits, for high torque cars, verify Panda safety mode flag is set

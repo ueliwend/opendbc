@@ -1,6 +1,7 @@
 import math
 import unittest
 
+from opendbc.can import CANParser
 from opendbc.car import DT_CTRL, CanData, structs
 from opendbc.car.car_helpers import interfaces
 from opendbc.car.fingerprints import FW_VERSIONS
@@ -111,6 +112,13 @@ def _make_car_test(car_name):
 
 
 class TestCarInterfaces(unittest.TestCase):
+  def setUp(self):
+    # a car state that decodes only listed signals (CANParser decode_only) must not read any other signal on any path
+    CANParser.strict_decode = True
+
+  def tearDown(self):
+    CANParser.strict_decode = False
+
   def test_interface_attrs(self):
     """Asserts basic behavior of interface attribute getter"""
     num_brands = len(get_interface_attr('CAR'))
