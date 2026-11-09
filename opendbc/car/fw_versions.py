@@ -230,6 +230,7 @@ def get_fw_versions_ordered(can_recv: CanRecvCallable, can_send: CanSendCallable
 
   all_car_fw = []
   brand_matches = get_brand_ecu_matches(ecu_rx_addrs)
+  retried = False
 
   # Sort brands by number of matching ECUs first, then percentage of matching ECUs in the database
   # This allows brands with only one ECU to be queried first (e.g. Tesla)
@@ -239,14 +240,80 @@ def get_fw_versions_ordered(can_recv: CanRecvCallable, can_send: CanSendCallable
       continue
 
     car_fw = get_fw_versions(can_recv, can_send, set_obd_multiplexing, query_brand=brand, timeout=timeout, progress=progress)
-    all_car_fw.extend(car_fw)
 
     # If there is a match using this brand's FW alone, finish querying early
     _, matches = match_fw_to_car(car_fw, vin, log=False)
+
+    # An ECU can miss a single request (seen on a Hyundai EPS when starting while driving). Query a brand once more
+    # when its answers give no single match but at least one answer is in its database. At most one retry per
+    # fingerprinting; a matched brand is never re-queried.
+    if len(matches) != 1 and not retried and has_known_fw_version(car_fw, brand):
+      retried = True
+      retry_fw = get_fw_versions(can_recv, can_send, set_obd_multiplexing, query_brand=brand, timeout=timeout, progress=progress)
+      added_fw = merge_fw_retry(car_fw, retry_fw)
+      # keep request order, as one complete pass would give it (readers such as NNLC take an ECU's first entry)
+      car_fw = sorted(car_fw + added_fw, key=fw_request_order(brand))
+      _, matches = match_fw_to_car(car_fw, vin, log=False)
+      carlog.warning(f"FW query retry for {brand}: {len(added_fw)} new answers, {len(matches)} matches")
+
+    all_car_fw.extend(car_fw)
     if len(matches) == 1:
       break
 
   return all_car_fw
+
+
+def has_known_fw_version(car_fw: list[CarParams.CarFw], brand: str) -> bool:
+  """Returns True if any matchable answer equals a version of this brand's database at that address"""
+  fw_versions_dict = build_fw_dict(car_fw, filter_brand=brand)
+  for ecus in VERSIONS[brand].values():
+    for (_, addr, sub_addr), versions in ecus.items():
+      if fw_versions_dict.get((addr, sub_addr), set()) & set(versions):
+        return True
+  return False
+
+
+def fw_request_order(brand: str) -> Callable[[CarParams.CarFw], tuple[int, int]]:
+  """Returns a sort key giving the position of an answer in get_fw_versions' query order for this brand:
+  (address group: parallel addresses first, then each sub-address in turn; request index)"""
+  config = FW_QUERY_CONFIGS[brand]
+  sub_addr_groups: list[tuple[int, int]] = []
+  for _, addr, sub_addr in config.get_all_ecus(VERSIONS[brand]):
+    if sub_addr is not None and (addr, sub_addr) not in sub_addr_groups:
+      sub_addr_groups.append((addr, sub_addr))
+
+  def key(fw: CarParams.CarFw) -> tuple[int, int]:
+    if fw.subAddress == 0:
+      group = 0
+    elif (fw.address, fw.subAddress) in sub_addr_groups:
+      group = 1 + sub_addr_groups.index((fw.address, fw.subAddress))
+    else:
+      group = len(sub_addr_groups) + 1
+    request = [bytes(r) for r in fw.request]
+    request_idx = next((i for i, r in enumerate(config.requests) if r.request == request and r.bus == fw.bus and
+                        r.obd_multiplexing == fw.obdMultiplexing), len(config.requests))
+    return group, request_idx
+
+  return key
+
+
+def _fw_query_key(fw: CarParams.CarFw) -> tuple:
+  # One request to one ECU on one bus
+  return (fw.brand, fw.address, fw.subAddress, fw.responseAddress, fw.bus, fw.obdMultiplexing, fw.logging,
+          tuple(bytes(r) for r in fw.request))
+
+
+def merge_fw_retry(car_fw: list[CarParams.CarFw], retry_fw: list[CarParams.CarFw]) -> list[CarParams.CarFw]:
+  """Returns the retry answers to requests that got no answer in the first pass. A first-pass answer is
+  never replaced or joined by a different answer to the same request (an unknown version still fails)."""
+  answered = {_fw_query_key(fw) for fw in car_fw}
+  added, added_keys = [], set()
+  for fw in retry_fw:
+    key = _fw_query_key(fw)
+    if key not in answered and key not in added_keys:
+      added.append(fw)
+      added_keys.add(key)
+  return added
 
 
 def get_fw_versions(can_recv: CanRecvCallable, can_send: CanSendCallable, set_obd_multiplexing: ObdCallback, query_brand: str | None = None,

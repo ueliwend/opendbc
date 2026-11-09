@@ -1,12 +1,14 @@
 import random
 import unittest
+from unittest.mock import patch
 
 from opendbc.can import CANPacker, CANParser
 from opendbc.can.parser import UndecodedSignalError
 from opendbc.car import Bus, DT_CTRL, gen_empty_fingerprint, structs
 from opendbc.car.can_definitions import CanData
 from opendbc.car.structs import CarParams, CarParamsSP
-from opendbc.car.fw_versions import build_fw_dict
+from opendbc.car.vin import VIN_UNKNOWN
+from opendbc.car.fw_versions import build_fw_dict, fw_request_order, get_fw_versions_ordered, match_fw_to_car
 from opendbc.car.hyundai import hyundaican
 from opendbc.car.hyundai.interface import CarInterface
 from opendbc.car.hyundai.carstate import AX1_CRUISE_BUTTONS, AX1_PAUSE_RESUME_BUTTON
@@ -627,3 +629,89 @@ class TestHyundaiFingerprint(unittest.TestCase):
         platforms_with_shared_codes.add(platform)
 
     assert platforms_with_shared_codes == excluded_platforms
+
+  # *** Hyundai Inster: a missed EPS answer is re-queried once (route 000000ff, 8 Nov 2026) ***
+
+  @staticmethod
+  def _inster_fw(eps=True, camera=True, radar=True, eps_version=None):
+    # Same layout as the Inster's logged answers: camera + EPS on bus 0, the radar on bus 0 and bus 1, plus
+    # logging-only answers (never matched). The EU car's ABS never answers. A refused request (NRC) or a timeout
+    # gives no entry at all (IsoTpParallelQuery).
+    db = FW_VERSIONS[CAR.HYUNDAI_INSTER]
+    fw = []
+
+    def add(ecu, addr, version, bus=0, logging=False, request=HYUNDAI_VERSION_REQUEST_LONG):
+      fw.append(CarParams.CarFw(ecu=ecu, fwVersion=version, address=addr, brand='hyundai', bus=bus, logging=logging,
+                                request=[request], obdMultiplexing=bus == 0))  # as logged: bus 0 multiplexed, bus 1 not
+
+    if camera:
+      add(Ecu.fwdCamera, 0x7c4, db[(Ecu.fwdCamera, 0x7c4, None)][0])
+    if eps:
+      add(Ecu.eps, 0x7d4, eps_version if eps_version is not None else db[(Ecu.eps, 0x7d4, None)][-1])
+    if radar:
+      add(Ecu.fwdRadar, 0x7d0, db[(Ecu.fwdRadar, 0x7d0, None)][0], bus=0)
+      add(Ecu.fwdRadar, 0x7d0, db[(Ecu.fwdRadar, 0x7d0, None)][0], bus=1)
+    add(Ecu.eps, 0x7d4, b'\x25\x01\x01', logging=True, request=b'\x22\xf1\x8b')  # manufacturing date: logging only
+    return fw
+
+  def _run_inster_query(self, passes):
+    # Runs get_fw_versions_ordered with the Hyundai passes given (other brands answer nothing), returns (queried brands, matches)
+    queried = []
+    hyundai_passes = iter(passes)
+
+    def fake_get_fw_versions(can_recv, can_send, set_obd_multiplexing, query_brand=None, **kwargs):
+      queried.append(query_brand)
+      return next(hyundai_passes) if query_brand == 'hyundai' else []
+
+    present = {(0x7c4 + 8, None, 0), (0x7d4 + 8, None, 0), (0x7d0 + 8, None, 0), (0x7c6 + 8, None, 0)}
+    with patch('opendbc.car.fw_versions.get_fw_versions', side_effect=fake_get_fw_versions):
+      car_fw = get_fw_versions_ordered(None, None, None, VIN_UNKNOWN, present)
+    return queried, match_fw_to_car(car_fw, VIN_UNKNOWN, log=False)
+
+  def test_inster_fw_rff_answers_do_not_match(self):
+    # Route 000000ff: camera + radar answered with the database versions, the EPS version answer was missing
+    assert match_fw_to_car(self._inster_fw(eps=False), VIN_UNKNOWN, log=False) == (True, set())
+    assert match_fw_to_car(self._inster_fw(), VIN_UNKNOWN, log=False) == (True, {CAR.HYUNDAI_INSTER})
+
+  def test_inster_fw_retry_recovers_missed_eps(self):
+    queried, matches = self._run_inster_query([self._inster_fw(eps=False), self._inster_fw()])
+    assert queried.count('hyundai') == 2 and queried[-1] == 'hyundai'  # one retry, then no other brand
+    assert matches == (True, {CAR.HYUNDAI_INSTER})
+
+  def test_inster_fw_retry_keeps_request_order(self):
+    # The recovered EPS version answer goes before the EPS manufacturing-date answer, as in one complete pass
+    # (sunnypilot's NNLC reads the first EPS entry of carFw)
+    db = FW_VERSIONS[CAR.HYUNDAI_INSTER]
+    passes = iter([self._inster_fw(eps=False), self._inster_fw()])
+    present = {(0x7c4 + 8, None, 0), (0x7d4 + 8, None, 0), (0x7d0 + 8, None, 0)}
+    with patch('opendbc.car.fw_versions.get_fw_versions', side_effect=lambda *_, query_brand=None, **__:
+               next(passes) if query_brand == 'hyundai' else []):
+      car_fw = get_fw_versions_ordered(None, None, None, VIN_UNKNOWN, present)
+    eps = [fw for fw in car_fw if fw.ecu == Ecu.eps]
+    assert [fw.logging for fw in eps] == [False, True]
+    assert eps[0].fwVersion in db[(Ecu.eps, 0x7d4, None)]
+    key = fw_request_order('hyundai')
+    assert [key(fw) for fw in car_fw] == sorted(key(fw) for fw in car_fw)
+
+  def test_inster_fw_normal_start_no_retry(self):
+    queried, matches = self._run_inster_query([self._inster_fw()])
+    assert queried.count('hyundai') == 1 and queried[-1] == 'hyundai'
+    assert matches == (True, {CAR.HYUNDAI_INSTER})
+
+  def test_inster_fw_eps_missing_twice_one_retry(self):
+    queried, matches = self._run_inster_query([self._inster_fw(eps=False), self._inster_fw(eps=False)])
+    assert queried.count('hyundai') == 2
+    assert all(queried.count(brand) == 1 for brand in set(queried) - {'hyundai'})  # other brands: no retry
+    assert matches == (True, set())
+
+  def test_inster_fw_unknown_eps_version_fails(self):
+    other_eps = FW_VERSIONS[CAR.HYUNDAI_KONA_EV_2022][(Ecu.eps, 0x7d4, None)][0]
+    unknown = self._inster_fw(eps_version=other_eps)
+    for desc, passes in (("unknown in both passes", [unknown, unknown]),
+                         ("missing, then unknown", [self._inster_fw(eps=False), unknown]),
+                         # the retry never adds a second answer to a request that was answered in the first pass
+                         ("unknown, then known", [unknown, self._inster_fw()])):
+      with self.subTest(desc):
+        queried, matches = self._run_inster_query(passes)
+        assert queried.count('hyundai') == 2
+        assert matches == (True, set())

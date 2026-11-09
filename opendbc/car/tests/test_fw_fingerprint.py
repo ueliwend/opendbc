@@ -10,7 +10,8 @@ from opendbc.car.car_helpers import interfaces
 from opendbc.car.structs import CarParams
 from opendbc.car.fingerprints import FW_VERSIONS
 from opendbc.car.fw_versions import FW_QUERY_CONFIGS, FUZZY_EXCLUDE_ECUS, VERSIONS, build_fw_dict, \
-                                    match_fw_to_car, get_brand_ecu_matches, get_fw_versions, get_present_ecus
+                                    match_fw_to_car, get_brand_ecu_matches, get_fw_versions, get_present_ecus, \
+                                    fw_request_order, get_fw_versions_ordered, merge_fw_retry
 from opendbc.car.vin import get_vin
 from opendbc.testing import parameterized
 
@@ -97,6 +98,81 @@ class TestFwFingerprint(unittest.TestCase):
       # There won't always be a match due to shared FW, but if there is it should be correct
       elif len(matches):
         self.assertFingerprints(matches, car_model)
+
+  @parameterized("brand, car_model, ecus", [(b, c, e[c]) for b, e in VERSIONS.items() for c in e])
+  def test_fw_query_retry(self, brand, car_model, ecus):
+    # get_fw_versions_ordered re-queries a brand at most once, only when its answers give no single match
+    # but include a known version; a brand that matches on the first pass is never re-queried
+    full_fw = [CarFw(ecu=ecu_name, fwVersion=fw_versions[0], brand=brand, address=addr,
+                     subAddress=0 if sub_addr is None else sub_addr) for (ecu_name, addr, sub_addr), fw_versions in ecus.items()]
+    _, full_matches = match_fw_to_car(full_fw, "", log=False)
+
+    def run(passes):
+      calls = []
+      passes = iter(passes)
+
+      def fake_get_fw_versions(*_, query_brand=None, **__):
+        calls.append(query_brand)
+        return next(passes)
+
+      with patch("opendbc.car.fw_versions.get_brand_ecu_matches", return_value={brand: [True]}), \
+           patch("opendbc.car.fw_versions.get_fw_versions", side_effect=fake_get_fw_versions):
+        car_fw = get_fw_versions_ordered(None, None, None, "", set())
+      return calls, match_fw_to_car(car_fw, "", log=False)[1]
+
+    # first pass answers fully: no retry, same result as before
+    calls, matches = run([full_fw, full_fw])
+    assert calls == [brand] if len(full_matches) == 1 else len(calls) == 2
+    assert matches == full_matches
+
+    # nothing answers: no retry
+    calls, matches = run([[], []])
+    assert calls == [brand] and matches == set()
+
+    # one ECU misses the first pass: at most one retry, which restores the first-pass result
+    if len(full_fw) > 1:
+      calls, matches = run([full_fw[1:], full_fw])
+      assert len(calls) <= 2
+      if len(full_matches) == 1:
+        assert matches == full_matches
+
+      # it misses both passes: still at most one retry
+      calls, _ = run([full_fw[1:], full_fw[1:]])
+      assert len(calls) <= 2
+
+  def test_merge_fw_retry(self):
+    # The retry only fills requests that got no answer; it never adds a second answer to an answered request
+    def fw(addr, version, bus=0, logging=False):
+      return CarFw(ecu=Ecu.eps, fwVersion=version, brand="hyundai", address=addr, bus=bus, logging=logging, request=[b"\x22\xf1\x00"])
+
+    first = [fw(0x7d4, b"A"), fw(0x7d0, b"R", bus=1)]
+    retry = [fw(0x7d4, b"B"), fw(0x7d0, b"R", bus=0), fw(0x7d0, b"R", bus=1), fw(0x7c4, b"C"), fw(0x7c4, b"C2"), fw(0x7d4, b"L", logging=True)]
+    added = merge_fw_retry(first, retry)
+    assert [(f.address, f.bus, f.fwVersion, f.logging) for f in added] == [(0x7d0, 0, b"R", False), (0x7c4, 0, b"C", False),
+                                                                            (0x7d4, 0, b"L", True)]
+
+  def test_fw_request_order(self):
+    # fw_request_order reproduces get_fw_versions' answer order for every brand, so a retried start can keep
+    # its merged answers in the order of one complete pass
+    def fake_get_data(query, timeout):
+      return {addr: b"\xf1\x00v" for addr in query.msg_addrs}
+
+    with patch("opendbc.car.isotp_parallel_query.IsoTpParallelQuery.get_data", fake_get_data):
+      for brand, config in FW_QUERY_CONFIGS.items():
+        if not config.requests:
+          continue
+        with self.subTest(brand=brand):
+          full = get_fw_versions(None, None, lambda obd: None, query_brand=brand)
+          key = fw_request_order(brand)
+          keys = [key(fw) for fw in full]
+          assert len(full) and keys == sorted(keys)
+          assert all(k[1] < len(FW_QUERY_CONFIGS[brand].requests) for k in keys)
+
+          # every other answer missing in the first pass, all present in the retry
+          first = full[::2]
+          merged = sorted(first + merge_fw_retry(first, full), key=key)
+          assert len(merged) == len(full)
+          assert [key(fw) for fw in merged] == keys
 
   def test_fw_version_lists(self):
     for car_model, ecus in FW_VERSIONS.items():
