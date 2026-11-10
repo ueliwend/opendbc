@@ -324,7 +324,9 @@ class CAR(Platforms):
   )
   HYUNDAI_INSTER = HyundaiRefreshPlatformConfig(
     [HyundaiCarDocs("Hyundai Inster (Casper Electric) 2025", car_parts=CarParts.common([CarHarness.hyundai_a]))],
-    CarSpecs(wheelbase=2.580, steerRatio=13.8, tireStiffnessFactor=0.385),
+    # steerRatio: 15.55 = settled paramsd value on the summer drives (median 15.549, LOG) and the value the lateral MPC holds
+    # fixed (MPC_FIXED in sunnypilot inster_lateral.py); was 13.8. paramsd starts from it and treats values outside 0.5-2x as invalid.
+    CarSpecs(wheelbase=2.580, steerRatio=15.55, tireStiffnessFactor=0.385),
     flags=HyundaiFlags.CHECKSUM_CRC8 | HyundaiFlags.CAMERA_SCC | HyundaiFlags.EV | HyundaiFlags.INSTER_LIMITS | HyundaiFlags.ALT_AX1EV_BUTTONS,
   )
   HYUNDAI_IONIQ = HyundaiPlatformConfig(
