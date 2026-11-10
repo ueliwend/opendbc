@@ -383,6 +383,9 @@ class TestHyundaiSafetyAltAx1evLdaButton(TestHyundaiSafetyCameraSCC):
     rocker = buttons if buttons in range(4) else Buttons.NONE
     return self._ax1_cruise_button_msg(rocker, buttons == Buttons.CANCEL, main_button, bus)
 
+  def _ignore_frequency_check_msgs(self):
+    return [self._lkas_button_msg(False), self._ax1_cruise_button_msg()]
+
   def test_ax1_button_tx_rejects_invalid_signals(self):
     self.safety.set_controls_allowed(True)
     self.assertFalse(self._tx(super()._button_msg(Buttons.RESUME, bus=self.BUTTONS_TX_BUS)))

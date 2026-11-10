@@ -9,7 +9,7 @@ When merging or cherry-picking another branch, add a row to the tables below.
 | Item | Value |
 |---|---|
 | Base | `origin/master` (mirror of `sunnypilot/opendbc` master, merged periodically) |
-| Last master merge | `335adbf0` (2026-10-21, master `5be75071`) |
+| Last master merge | `4a38ff0b` (2026-11-04, master `aa9bff6f`) |
 
 ## Merged branches
 
@@ -32,6 +32,7 @@ so git ancestry does not connect it to the original branches. The sources were i
 | `fca0d767` | Forward the stock HDA state when sending `LFAHDA_MFC` (fixes the HDA indicator disappearing), `Navi_HU.Navi_RoadClass`, `AX1_CRUISE_BUTTONS` value table |
 | `9c7f1381` | Decode `HDA11_MFC` (0x484) lane info: left/right lane status, lane crossing pulses, lane angle |
 | `fcb6405e` | Fixes on top of the radar-tracks merge: drop deprecated `RadarPoint` fields, remove debug `print()`s, default when the `HyundaiRadar` param is unset, publish radar data at 20 Hz |
+| `e8d9cf87` | List the AX1EV `ignore_frequency_check` rx checks (`0x416`, `0x3EF`) for the upstream `test_ignore_frequency_check` added in master `e3f1487d` |
 
 ## Known issues / TODO
 
