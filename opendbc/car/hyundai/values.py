@@ -18,17 +18,14 @@ Ecu = CarParams.Ecu
 # together (the safety test fails if they differ).
 # INSTER_STEER_MAX (409) is the cap: the EPS limit is a level; the lowest faulting command was 417 raw, the highest fault-free
 # 409 (held up to 2.45 s; routes 00000072 and 0000007f, 23 Oct 2026), estimate 410-414. Owner-approved experimental exception.
-# INSTER_STEER_FULL_SCALE (384) is the full-scale command: actuators.torque 1.0 = 384 raw, so the Inster's torque values
-# in torque_data/override.toml (per full command), openpilot's controller gains and feed-forward tables and the torque
-# learner keep their meaning; the controllers may request up to INSTER_STEER_MAX / INSTER_STEER_FULL_SCALE (1.065).
-# When changing INSTER_STEER_FULL_SCALE, update HYUNDAI_INSTER in torque_data/override.toml as well: scale
-# LAT_ACCEL_FACTOR by the same ratio; FRICTION shrinks roughly by the inverse ratio.
+# INSTER_STEER_MAX is also the full-scale command, as for every Hyundai: actuators.torque 1.0 = 409 raw (A7, 12 Nov 2026; was 384
+# with the cap at 1.065). The Inster's torque values in torque_data/override.toml are per full command, so they follow
+# INSTER_STEER_MAX: when changing it, scale LAT_ACCEL_FACTOR by the same ratio and FRICTION by the inverse ratio
+# (tests/test_hyundai.py test_inster_learner_torque_units measures the full scale and checks both).
 INSTER_STEER_MAX = 409
-INSTER_STEER_FULL_SCALE = 384
-# Ramp 3 up / 6 down raw per frame (owner's choice, 5 Nov 2026; down was 5): 0 to 384 in 1.28 s, 384 to 0 in 0.64 s. The rise is the
+# Ramp 3 up / 6 down raw per frame (owner's choice, 5 Nov 2026; down was 5): 0 to 409 in 1.36 s, 409 to 0 in 0.68 s. The rise is the
 # standard Hyundai CAN 3; the release 6 is below the standard 7 (panda HYUNDAI_LIMITS(384, 3, 7)), where it only sets the minimum
-# forced release under driver override (6 per frame instead of 7). The jerk of the faster release needs a narrow exception in
-# tests/test_lateral_limits.py (full-scale variant only). Not validated on the car.
+# forced release under driver override (6 per frame instead of 7). Not validated on the car.
 INSTER_STEER_DELTA_UP = 3
 INSTER_STEER_DELTA_DOWN = 6
 # Highest lateral acceleration (m/s^2) the Inster reaches at INSTER_STEER_MAX (owner's choice, 20-23 Oct 2026; route 0000007f at 409:
@@ -56,8 +53,6 @@ class CarControllerParams:
     self.STEER_DRIVER_FACTOR = 1
     self.STEER_THRESHOLD = 150
     self.STEER_STEP = 1  # 100 Hz
-    # STEER_MAX: the cap (raw); STEER_FULL_SCALE: the raw command for actuators.torque 1.0. Equal for every car but the Inster.
-    self.STEER_FULL_SCALE = None
 
     if CP.flags & HyundaiFlags.CANFD:
       self.STEER_MAX = 270
@@ -67,10 +62,9 @@ class CarControllerParams:
       self.STEER_DELTA_UP = 2
       self.STEER_DELTA_DOWN = 3
 
-    # Hyundai Inster: its own limit entry (INSTER_STEER_* above) so it can be tuned on its own; cap 409 with 1.0 = 384 raw
+    # Hyundai Inster: its own limit entry (INSTER_STEER_* above) so it can be tuned on its own; cap 409 = full scale (1.0 = 409 raw)
     elif CP.flags & HyundaiFlags.INSTER_LIMITS:
       self.STEER_MAX = INSTER_STEER_MAX
-      self.STEER_FULL_SCALE = INSTER_STEER_FULL_SCALE
       self.STEER_DELTA_UP = INSTER_STEER_DELTA_UP
       self.STEER_DELTA_DOWN = INSTER_STEER_DELTA_DOWN
 
@@ -95,9 +89,6 @@ class CarControllerParams:
     # Default for most HKG
     else:
       self.STEER_MAX = 384
-
-    if self.STEER_FULL_SCALE is None:
-      self.STEER_FULL_SCALE = self.STEER_MAX
 
 
 class HyundaiSafetyFlags(IntFlag):

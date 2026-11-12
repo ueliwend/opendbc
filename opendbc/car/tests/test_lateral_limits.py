@@ -6,7 +6,7 @@ from opendbc.testing import parameterized_class
 
 from opendbc.car import DT_CTRL
 from opendbc.car.car_helpers import interfaces
-from opendbc.car.hyundai.values import INSTER_MAX_LAT_ACCEL_MEASURED, INSTER_STEER_MAX, INSTER_STEER_FULL_SCALE
+from opendbc.car.hyundai.values import INSTER_MAX_LAT_ACCEL_MEASURED, INSTER_STEER_MAX
 from opendbc.car.interfaces import get_torque_params
 from opendbc.car.lateral import ISO_LATERAL_ACCEL
 from opendbc.car.values import PLATFORMS
@@ -19,16 +19,13 @@ MAX_LAT_JERK_UP_TOLERANCE = 0.5  # m/s^3
 # jerk is measured over half a second
 JERK_MEAS_T = 0.5
 
-# Owner-approved experimental exceptions, Hyundai Inster only (nothing else is exempt), see TestInsterLateralLimitsException:
+# Owner-approved experimental exception, Hyundai Inster only (nothing else is exempt), see TestInsterLateralLimitsException:
 # * MAX_LAT_ACCEL_EXCEPTIONS (20-23 Oct 2026): its MAX_LAT_ACCEL_MEASURED is a placeholder for the lateral acceleration at its cap of
 #   409 raw, above ISO 11270's 3.0.
-# * MAX_LAT_JERK_DOWN_FULL_SCALE_EXCEPTIONS (5 Nov 2026, ramp 3 up / 6 down): the Inster test also reads the jerk, more conservatively,
-#   as if MAX_LAT_ACCEL_MEASURED were already reached at the full scale 384 instead of the cap 409; in that reading only, the release
-#   at 6 raw per frame gives 5.16 m/s^3 and may go up to 5.2 instead of ISO's 5.0. The up-jerk bound (2.5 + 0.5) applies in full,
-#   and so does the down bound at the cap (the reading TestLateralLimits uses for every car; the Inster's is 4.84).
+# Its jerk with the ramps 3 up / 6 down is read at the cap 409, as for every car (up 2.42, down 4.84 m/s^3), within ISO's bounds. Since
+# A7 (12 Nov 2026) the cap is also the full scale, so the former conservative reading at a full scale of 384 and its down-jerk exception
+# (5.2) are gone (owner's decision, 12 Nov 2026).
 MAX_LAT_ACCEL_EXCEPTIONS = {'HYUNDAI_INSTER': INSTER_MAX_LAT_ACCEL_MEASURED}
-MAX_LAT_JERK_DOWN_FULL_SCALE_EXCEPTIONS = {'HYUNDAI_INSTER': 5.2}
-
 
 @parameterized_class('car_model', [(c,) for c in sorted(PLATFORMS)])
 class TestLateralLimits(unittest.TestCase):
@@ -83,22 +80,17 @@ class TestLateralLimits(unittest.TestCase):
 
 
 class TestInsterLateralLimitsException(unittest.TestCase):
-  """The Hyundai Inster's owner-approved exceptions (MAX_LAT_ACCEL_EXCEPTIONS, MAX_LAT_JERK_DOWN_FULL_SCALE_EXCEPTIONS): this car only,
-  the value in the torque data equals the constant in values.py, and with its ramps (3 up / 6 down) the jerk rules hold at the cap 409
-  (MAX_LAT_ACCEL_MEASURED reached at 409, the reading TestLateralLimits uses) in full and, more conservatively, as if it were already
-  reached at the full scale 384 with the down bound 5.2 instead of 5.0 (the up bound in full)."""
+  """The Hyundai Inster's owner-approved exception (MAX_LAT_ACCEL_EXCEPTIONS): this car only, the value in the torque data equals the
+  constant in values.py, and with its ramps (3 up / 6 down) the jerk rules hold in full at the cap 409 = full scale (MAX_LAT_ACCEL_MEASURED
+  reached at 409, the reading TestLateralLimits uses for every car)."""
 
   @staticmethod
   def jerk_ok(control_params, torque_params, steer_delta_up, steer_delta_down) -> bool:
-    # the Inster's jerk rule for the given ramp: at the cap ISO's bounds; at the full scale ISO's up bound, the excepted down bound
-    for cap, down_max in ((INSTER_STEER_MAX, MAX_LAT_JERK_DOWN),
-                          (INSTER_STEER_FULL_SCALE, MAX_LAT_JERK_DOWN_FULL_SCALE_EXCEPTIONS['HYUNDAI_INSTER'])):
-      params = copy.copy(control_params)
-      params.STEER_MAX, params.STEER_DELTA_UP, params.STEER_DELTA_DOWN = cap, steer_delta_up, steer_delta_down
-      up_jerk, down_jerk = TestLateralLimits.calculate_0_5s_jerk(params, torque_params)
-      if up_jerk > MAX_LAT_JERK_UP + MAX_LAT_JERK_UP_TOLERANCE or down_jerk > down_max:
-        return False
-    return True
+    # the Inster's jerk rule for the given ramp, read at the cap with ISO's bounds
+    params = copy.copy(control_params)
+    params.STEER_MAX, params.STEER_DELTA_UP, params.STEER_DELTA_DOWN = INSTER_STEER_MAX, steer_delta_up, steer_delta_down
+    up_jerk, down_jerk = TestLateralLimits.calculate_0_5s_jerk(params, torque_params)
+    return up_jerk <= MAX_LAT_JERK_UP + MAX_LAT_JERK_UP_TOLERANCE and down_jerk <= MAX_LAT_JERK_DOWN
 
   @staticmethod
   def inster_params():
@@ -109,22 +101,19 @@ class TestInsterLateralLimitsException(unittest.TestCase):
 
   def test_exception_scope(self):
     assert set(MAX_LAT_ACCEL_EXCEPTIONS) == {'HYUNDAI_INSTER'}
-    assert set(MAX_LAT_JERK_DOWN_FULL_SCALE_EXCEPTIONS) == {'HYUNDAI_INSTER'}
-    # the owner-approved bound of the down-jerk exception (full-scale reading only): widening it needs a deliberate change here
-    assert MAX_LAT_JERK_DOWN_FULL_SCALE_EXCEPTIONS['HYUNDAI_INSTER'] == 5.2
     # the owner-approved bound: raising the Inster's value above 3.3 m/s^2 needs a deliberate change here
     assert INSTER_MAX_LAT_ACCEL_MEASURED <= 3.3
     assert get_torque_params()['HYUNDAI_INSTER']['MAX_LAT_ACCEL_MEASURED'] == INSTER_MAX_LAT_ACCEL_MEASURED
 
-  def test_jerk_limits_at_cap_and_full_scale(self):
+  def test_jerk_limits_at_cap(self):
     control_params, torque_params = self.inster_params()
-    assert (control_params.STEER_MAX, control_params.STEER_FULL_SCALE) == (INSTER_STEER_MAX, INSTER_STEER_FULL_SCALE) == (409, 384)
+    assert control_params.STEER_MAX == INSTER_STEER_MAX == 409
+    assert not hasattr(control_params, 'STEER_FULL_SCALE')
     assert (control_params.STEER_DELTA_UP, control_params.STEER_DELTA_DOWN) == (3, 6)
     assert self.jerk_ok(control_params, torque_params, control_params.STEER_DELTA_UP, control_params.STEER_DELTA_DOWN)
 
-  def test_exception_admits_no_faster_ramp(self):
-    # the exception is just wide enough for 3 up / 6 down: a rise of 4 (up 3.23 m/s^3 at the cap) or a release of 7 (down 6.02 at the
-    # full scale, 5.65 at the cap) still fails
+  def test_no_faster_ramp_passes(self):
+    # 3 up / 6 down is within ISO's bounds at the cap; a rise of 4 (up 3.23 m/s^3) or a release of 7 (down 5.65) still fails
     control_params, torque_params = self.inster_params()
     assert self.jerk_ok(control_params, torque_params, 3, 6)
     for up, down in ((4, 6), (3, 7), (4, 5), (4, 7)):

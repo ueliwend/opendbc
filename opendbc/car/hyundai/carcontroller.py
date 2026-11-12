@@ -86,8 +86,7 @@ class CarController(CarControllerBase, CcncCarController, EsccCarController, Lea
     hud_control = CC.hudControl
 
     # steering torque
-    # actuators.torque 1.0 = STEER_FULL_SCALE raw (= STEER_MAX for every car but the Inster: 384 there, cap STEER_MAX 409)
-    new_torque = int(round(actuators.torque * self.params.STEER_FULL_SCALE))
+    new_torque = int(round(actuators.torque * self.params.STEER_MAX))
     apply_torque = apply_driver_steer_torque_limits(new_torque, self.apply_torque_last, CS.out.steeringTorque, self.params)
 
     # >90 degree steering fault prevention
@@ -143,7 +142,7 @@ class CarController(CarControllerBase, CcncCarController, EsccCarController, Lea
     can_sends.extend(IntelligentCruiseButtonManagementInterface.update(self, CS, CC_SP, self.packer, self.frame, self.last_button_frame, self.CAN))
 
     new_actuators = actuators.as_builder()
-    new_actuators.torque = apply_torque / self.params.STEER_FULL_SCALE
+    new_actuators.torque = apply_torque / self.params.STEER_MAX
     new_actuators.torqueOutputCan = apply_torque
     new_actuators.accel = self.tuning.actual_accel
 

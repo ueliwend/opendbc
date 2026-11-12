@@ -1,4 +1,6 @@
+import math
 import random
+import struct
 import unittest
 from unittest.mock import patch
 
@@ -22,7 +24,7 @@ from opendbc.car.hyundai.values import CAR, DATE_FW_ECUS, \
                                          PLATFORM_CODE_ECUS, HYUNDAI_VERSION_REQUEST_LONG, \
                                          HyundaiFlags, get_platform_codes, HyundaiSafetyFlags, Buttons, DBC, \
                                          NON_SCC_CAR, CarControllerParams, INSTER_STEER_MAX, INSTER_STEER_DELTA_UP, \
-                                         INSTER_STEER_DELTA_DOWN, INSTER_STEER_ACTUATOR_DELAY, INSTER_STEER_FULL_SCALE
+                                         INSTER_STEER_DELTA_DOWN, INSTER_STEER_ACTUATOR_DELAY
 from opendbc.car.hyundai.fingerprints import FW_VERSIONS
 from opendbc.sunnypilot.car.hyundai.values import HyundaiFlagsSP
 from opendbc.testing import fuzzy_test
@@ -348,24 +350,44 @@ class TestHyundaiFingerprint(unittest.TestCase):
            (INSTER_STEER_MAX, INSTER_STEER_DELTA_UP, INSTER_STEER_DELTA_DOWN)
 
   def test_inster_full_scale(self):
-    # the Inster: cap 409 with actuators.torque 1.0 = 384 raw; every other car: full scale = cap (unchanged)
+    # A7 (12 Nov 2026): actuators.torque 1.0 = STEER_MAX for every car, the Inster included (409 raw = its cap)
     fingerprint = gen_empty_fingerprint()
-    assert (INSTER_STEER_MAX, INSTER_STEER_FULL_SCALE) == (409, 384)
+    assert INSTER_STEER_MAX == 409
     for car_model in CAR:
       CP = CarInterface.get_params(car_model, fingerprint, [], False, False, False)
-      params = CarControllerParams(CP)
-      expected = INSTER_STEER_FULL_SCALE if car_model == CAR.HYUNDAI_INSTER else params.STEER_MAX
-      assert params.STEER_FULL_SCALE == expected, car_model
+      assert not hasattr(CarControllerParams(CP), "STEER_FULL_SCALE"), car_model
+
+  def test_inster_full_scale_round_trip(self):
+    # every raw command n in -409..409, sent as the float32 request n / 409 (cereal transports actuators.torque as float32), comes
+    # out of the real CarController as n raw, and actuatorsOutput.torque reads back as n / 409 (to float32 precision)
+    CI = self._inster_interface()
+    assert CI.CC.params.STEER_MAX == INSTER_STEER_MAX
+    now_nanos = 0
+    for n in range(-INSTER_STEER_MAX, INSTER_STEER_MAX + 1):
+      CC = structs.CarControl()
+      CC.enabled = True
+      CC.latActive = True
+      CC.actuators.torque = struct.unpack('f', struct.pack('f', n / INSTER_STEER_MAX))[0]
+      CC = CC.as_reader()
+      CI.update([])
+      CI.CS.out.steeringTorque = 0
+      CI.CC.apply_torque_last = n   # start at n, so the ramp limits do not hold the command back
+      actuators, _ = CI.apply(CC, structs.CarControlSP(), now_nanos)
+      now_nanos += int(DT_CTRL * 1e9)
+      assert actuators.torqueOutputCan == n, (n, actuators.torqueOutputCan)
+      assert round(actuators.torque * INSTER_STEER_MAX) == n, (n, actuators.torque)   # actuatorsOutput.torque is float32 too
 
   def test_inster_car_controller_cap(self):
-    # requests beyond 1.0 reach 409 raw on the Inster (1.0 = 384), never more; other cars still cap at 1.0 = their STEER_MAX
+    # requests beyond 1.0 reach 409 raw on the Inster (1.0 = 409 = cap), never more; other cars cap at 1.0 = their STEER_MAX
     fingerprint = gen_empty_fingerprint()
-    for car_model, request, expected in ((CAR.HYUNDAI_INSTER, -1.5, -409), (CAR.HYUNDAI_INSTER, 1.0, 384),
-                                         (CAR.HYUNDAI_INSTER, 409 / 384, 409), (CAR.HYUNDAI_INSTER, 1.07, 409),
+    for car_model, request, expected in ((CAR.HYUNDAI_INSTER, -1.5, -1.0), (CAR.HYUNDAI_INSTER, 1.0, 1.0),
+                                         (CAR.HYUNDAI_INSTER, 0.5, 204 / 409), (CAR.HYUNDAI_INSTER, 1.07, 1.0),
                                          (CAR.HYUNDAI_KONA_EV, 1.5, 1.0), (CAR.KIA_CEED, -1.0, -1.0), (CAR.HYUNDAI_ELANTRA, 1.3, 1.0)):
       CP = CarInterface.get_params(car_model, fingerprint, [], False, False, False)
-      if car_model != CAR.HYUNDAI_INSTER:
-        expected = int(expected * CarControllerParams(CP).STEER_MAX)
+      full_scale = CarControllerParams(CP).STEER_MAX
+      expected = int(round(expected * full_scale))
+      if car_model == CAR.HYUNDAI_INSTER:
+        assert full_scale == INSTER_STEER_MAX
       CP_SP = CarInterface.get_params_sp(CP, car_model, fingerprint, [], False, False, False)
       CI = CarInterface(CP, CP_SP)
       CC = structs.CarControl()
@@ -381,10 +403,59 @@ class TestHyundaiFingerprint(unittest.TestCase):
         actuators, _ = CI.apply(CC, structs.CarControlSP(), now_nanos)
         outputs.append(actuators.torqueOutputCan)
         now_nanos += int(DT_CTRL * 1e9)
-      full_scale = INSTER_STEER_FULL_SCALE if car_model == CAR.HYUNDAI_INSTER else CarControllerParams(CP).STEER_MAX
       assert outputs[-1] == expected, (car_model, request, outputs[-1])
       assert max(abs(o) for o in outputs) == abs(expected)
       self.assertAlmostEqual(actuators.torque, expected / full_scale, places=6)
+
+  # A7 guard (Device & Platform, results/2026-11-12_a7_learned_torque): torqued's cache key holds the CarParams latAccelFactor and
+  # friction (selfdrive/locationd/torqued.py get_restore_key). They are per full-scale command, so they must follow the full scale the car
+  # really uses. The full scale is measured from the car's own conversion (no full-scale constant), so this survives any refactor of it.
+  INSTER_LAT_ACCEL_PER_RAW = 3.7 / 384   # m/s^2 per raw command unit (9.6354e-3), from torqued at 384 (override.toml comment)
+  INSTER_FRICTION_RAW = 0.085 * 384      # raw command units (32.64)
+
+  @staticmethod
+  def _inster_interface():
+    fingerprint = gen_empty_fingerprint()
+    CP = CarInterface.get_params(CAR.HYUNDAI_INSTER, fingerprint, [], False, False, False)
+    CP_SP = CarInterface.get_params_sp(CP, CAR.HYUNDAI_INSTER, fingerprint, [], False, False, False)
+    return CarInterface(CP, CP_SP)
+
+  @staticmethod
+  def _measured_full_scale(CI, request=0.5, frames=200):
+    # raw per 1.0 through the real CarController: torqueOutputCan / actuatorsOutput.torque (0.5 stays below the cap for any full scale)
+    CC = structs.CarControl()
+    CC.enabled = True
+    CC.latActive = True
+    CC.actuators.torque = request
+    CC = CC.as_reader()
+    now_nanos = 0
+    for _ in range(frames):
+      CI.update([])
+      CI.CS.out.steeringTorque = 0
+      actuators, _ = CI.apply(CC, structs.CarControlSP(), now_nanos)
+      now_nanos += int(DT_CTRL * 1e9)
+    assert actuators.torque != 0 and 0 < abs(actuators.torqueOutputCan) < CarControllerParams(CI.CP).STEER_MAX
+    return actuators.torqueOutputCan / actuators.torque
+
+  def _check_learner_torque_units(self, CP, full_scale):
+    tune = CP.lateralTuning.torque
+    assert math.isclose(tune.latAccelFactor / full_scale, self.INSTER_LAT_ACCEL_PER_RAW, rel_tol=1e-4), (tune.latAccelFactor, full_scale)
+    assert math.isclose(tune.friction * full_scale, self.INSTER_FRICTION_RAW, rel_tol=1e-4), (tune.friction, full_scale)
+
+  def test_inster_learner_torque_units(self):
+    CI = self._inster_interface()
+    self._check_learner_torque_units(CI.CP, self._measured_full_scale(CI))
+
+  def test_inster_learner_torque_units_guard_detects_unit_change(self):
+    # negative case: the car's conversion changes while torque_data stays -> the guard must fail
+    CI = self._inster_interface()
+    CI.CC.params.STEER_MAX = 300   # a full scale no variant uses; set both attributes so it works with or without STEER_FULL_SCALE
+    if hasattr(CI.CC.params, "STEER_FULL_SCALE"):
+      CI.CC.params.STEER_FULL_SCALE = 300
+    full_scale = self._measured_full_scale(CI)
+    assert full_scale == 300
+    with self.assertRaises(AssertionError):
+      self._check_learner_torque_units(CI.CP, full_scale)
 
   def test_inster_steer_actuator_delay(self):
     # The Inster has its own default steering delay (INSTER_STEER_ACTUATOR_DELAY); the other cars keep theirs
